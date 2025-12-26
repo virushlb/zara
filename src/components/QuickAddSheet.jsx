@@ -30,6 +30,14 @@ export default function QuickAddSheet({
     return Array.isArray(product?.sizes) ? product.sizes.filter(Boolean) : [];
   }, [product]);
 
+  // Shein-like sizing layout:
+  // - Short labels (S/M/L/XL) look best in 3 columns
+  // - Longer labels (e.g. 39-42) look best in 2 columns
+  const sizeGridCols = useMemo(() => {
+    const hasLong = sizes.some((s) => String(s).trim().length > 2);
+    return hasLong ? "grid-cols-2" : "grid-cols-3";
+  }, [sizes]);
+
   const perImage = isPerImageStock(product?.stock);
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedSize, setSelectedSize] = useState("");
@@ -193,7 +201,9 @@ export default function QuickAddSheet({
         {/* Content */}
         <div
           data-sheet-scroll
-          className="h-full overflow-auto pb-24"
+          className="h-full overflow-auto"
+          // Enough space so options are never hidden behind the sticky CTA (incl. iOS safe-area).
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 140px)" }}
         >
           {/* Image gallery */}
           <div className="px-4 pt-4">
@@ -205,7 +215,7 @@ export default function QuickAddSheet({
               >
                 {images.map((src, i) => (
                   <div key={src + i} className="min-w-full snap-center">
-                    <div className="aspect-[4/3] bg-[var(--color-surface-2)]">
+                    <div className="aspect-[16/10] bg-[var(--color-surface-2)]">
                       <SafeImage
                         src={src}
                         alt={product?.name || "Product"}
@@ -271,7 +281,7 @@ export default function QuickAddSheet({
                 </Link>
               </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className={`mt-3 grid ${sizeGridCols} gap-2`}>
                 {sizes.map((s) => {
                   const disabled = perImage
                     ? getMaxStockFor(product, s, activeIndex) <= 0
@@ -287,11 +297,11 @@ export default function QuickAddSheet({
                         setSelectedSize(s);
                       }}
                       className={
-                        "h-11 rounded-full border text-sm transition-all baggo-tap " +
+                        "h-11 rounded-full border px-3 text-sm font-medium whitespace-nowrap transition-colors baggo-tap focus:outline-none focus-visible:ring-2 focus-visible:ring-black/15 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] " +
                         (active
-                          ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
-                          : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]") +
-                        (disabled ? " opacity-40 cursor-not-allowed" : "")
+                          ? "bg-black/5 text-[var(--color-text)] border-[var(--color-text)]"
+                          : "bg-[var(--color-surface-2)] text-[var(--color-text)] border-[var(--color-border)]") +
+                        (disabled ? " opacity-35 cursor-not-allowed" : "")
                       }
                     >
                       {s}
