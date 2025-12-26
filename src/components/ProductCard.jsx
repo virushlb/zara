@@ -5,6 +5,7 @@ import { useCart } from "../context/CartContext";
 import { getMaxStockFor, hasAnyStock, isPerImageStock, pickFirstInStock } from "../lib/stock";
 import SafeImage from "./SafeImage";
 import Modal from "./Modal";
+import QuickAddSheet from "./QuickAddSheet";
 import { getImageMeta } from "../lib/imageMeta";
 import { getUnitPrice, hasDiscount, getBasePrice } from "../lib/pricing";
 
@@ -21,8 +22,23 @@ export default function ProductCard({ product }) {
 
   const [added, setAdded] = useState(false);
   const [sizeModalOpen, setSizeModalOpen] = useState(false);
+  const [sizeSheetOpen, setSizeSheetOpen] = useState(false);
   const [modalSize, setModalSize] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
   const addedTimerRef = useRef(null);
+
+  useEffect(() => {
+    // Mobile detection (used for quick-add UX)
+    const mq = window.matchMedia("(max-width: 640px)");
+    const update = () => setIsMobile(Boolean(mq.matches));
+    update();
+    if (mq.addEventListener) mq.addEventListener("change", update);
+    else mq.addListener(update);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", update);
+      else mq.removeListener(update);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -43,7 +59,10 @@ export default function ProductCard({ product }) {
     // We open a quick modal instead of silently failing.
     if (sizes.length > 1) {
       setModalSize("");
-      setSizeModalOpen(true);
+      // Desktop: center modal
+      // Mobile: full product bottom sheet (Shein-like)
+      if (isMobile) setSizeSheetOpen(true);
+      else setSizeModalOpen(true);
       return;
     }
 
@@ -154,14 +173,44 @@ export default function ProductCard({ product }) {
       </Link>
 
       {/* Quick-add size picker (only when product has multiple sizes) */}
+      <QuickAddSheet
+        open={sizeSheetOpen}
+        product={product}
+        initialVariantIndex={isPerImageStock(product?.stock) ? Number(quickPick.variantIndex ?? 0) : 0}
+        onClose={() => setSizeSheetOpen(false)}
+        onConfirm={({ size, variantIndex, imageUrl, meta }) => {
+          if (!size) return;
+          addToCart({
+            ...product,
+            size,
+            variantIndex,
+            image: imageUrl,
+            imageName: meta?.name,
+            imageDescription: meta?.description,
+            imageIndex: meta?.index,
+          });
+
+          setSizeSheetOpen(false);
+          setAdded(true);
+          if (addedTimerRef.current) window.clearTimeout(addedTimerRef.current);
+          addedTimerRef.current = window.setTimeout(() => setAdded(false), 1200);
+        }}
+      />
+
       <Modal
         open={sizeModalOpen}
         title="Choose options"
         onClose={() => setSizeModalOpen(false)}
         widthClass="max-w-lg"
-        variant="sheet"
         footer={
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSizeModalOpen(false)}
+              className="rounded-full px-4 py-2 text-sm border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] transition"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -201,7 +250,7 @@ export default function ProductCard({ product }) {
                 addedTimerRef.current = window.setTimeout(() => setAdded(false), 1200);
               }}
               disabled={!modalSize}
-              className="w-full sm:w-auto rounded-full px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-40 transition active:scale-[0.99]"
+              className="rounded-full px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-40 transition active:scale-[0.99]"
             >
               Add to cart
             </button>
@@ -209,10 +258,10 @@ export default function ProductCard({ product }) {
         }
       >
         <p className="text-sm text-[var(--color-text-muted)]">
-          Select a size for <span className="font-medium text-[var(--color-text)]">{product.name}</span>.
+          Select a size to add <span className="font-medium text-[var(--color-text)]">{product.name}</span> to your cart.
         </p>
 
-        <div className="mt-4 grid grid-cols-3 gap-3 sm:flex sm:flex-wrap sm:gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {(product?.sizes || []).map((s) => {
             const disabled =
               isPerImageStock(product?.stock)
@@ -228,7 +277,7 @@ export default function ProductCard({ product }) {
                 disabled={disabled}
                 onClick={() => setModalSize(s)}
                 className={
-                  "inline-flex w-full items-center justify-center rounded-full text-sm border transition-all active:scale-[0.98] px-0 py-3 sm:px-4 sm:py-2 " +
+                  "px-4 py-2 rounded-full text-sm border transition-all active:scale-[0.98] " +
                   (modalSize === s
                     ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                     : "bg-[var(--color-surface-2)] text-[var(--color-text)] border-[var(--color-border)] hover:border-[var(--color-text)]/30") +

@@ -67,35 +67,15 @@ export default function Home() {
   const featured = products.filter((p) => p.featured);
   const featuredList = (featured.length ? featured : products).slice(0, 8);
 
-  // Collections carousel: show multiple products (unique), not just 2 repeating tiles.
-  const catLabelBySlug = useRef(null);
-  catLabelBySlug.current = Object.fromEntries(
-    (categories || []).map((c) => [String(c.slug), c.label || c.slug])
-  );
-
-  function pickUnique(arr, n) {
-    const list = (arr || []).filter(Boolean);
-    // Fisher–Yates shuffle copy
-    const a = list.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a.slice(0, Math.max(0, n));
-  }
-
-  const collectionProducts = useRef([]);
-  // Keep stable per render session to avoid "jumping" on small state changes.
-  if (!collectionProducts.current.length && products?.length) {
-    collectionProducts.current = pickUnique(products, Math.min(8, products.length));
-  }
+  const visibleCats = (categories || []).filter((c) => c.visible !== false);
+  const firstTwo = visibleCats.slice(0, 2);
 
   const quads = [
-    ...collectionProducts.current.map((p) => ({
-      title: p.name,
-      subtitle: catLabelBySlug.current?.[String(p.category)] || "Collection",
-      href: `/product/${p.id}`,
-      image: p.image || heroMain?.image,
+    ...firstTwo.map((c) => ({
+      title: c.label,
+      subtitle: "Category",
+      href: `/shop?category=${c.slug}`,
+      image: products.find((p) => p.category === c.slug)?.image || heroMain?.image,
     })),
     {
       title: "Shop All",

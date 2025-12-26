@@ -483,24 +483,10 @@ const categoryCounts = useMemo(() => {
       images: "",
       stock: {},
     });
-
-    // On mobile the editor is shown above the list; make sure it's visible.
-    try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      window.scrollTo(0, 0);
-    }
   }
 
   function startEditProduct(id) {
     setEditingId(id);
-
-    // Keep the editor in view on smaller screens.
-    try {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch {
-      window.scrollTo(0, 0);
-    }
   }
 
   function cancelEdit() {
@@ -825,7 +811,7 @@ async function saveWebsiteNow() {
         {/* PRODUCTS */}
         {tab === "products" && (
           <div className="mt-8 grid lg:grid-cols-[1fr_420px] gap-8">
-            <div className="order-2 lg:order-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
               <div className="p-4 flex items-center justify-between">
                 <p className="text-sm text-[var(--color-text-muted)]">{products.length} products</p>
                 <button
@@ -881,19 +867,10 @@ async function saveWebsiteNow() {
             </div>
 
             {/* Editor */}
-            <div className="order-1 lg:order-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
               {!draft ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    Select a product to edit, or create a new one.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={startNewProduct}
-                    className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-95 transition"
-                  >
-                    + New product
-                  </button>
+                <div className="text-sm text-[var(--color-text-muted)]">
+                  Select a product to edit or create a new one.
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -1660,8 +1637,7 @@ async function saveWebsiteNow() {
                               disabled={!phone}
                               onClick={() => {
                                 if (!phone) return;
-                                const storeName = String(settings?.siteName || "Baggo");
-                                const msg = `Hi${customer?.name ? ` ${customer.name}` : ""}! About your ${storeName} order ${o.id}: status is ${o.status || "new"}.`;
+                                const msg = `Hi${customer?.name ? ` ${customer.name}` : ""}! About your Baggo order ${o.id}: status is ${o.status || "new"}.`;
                                 const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
                                 window.open(url, "_blank");
                               }}
@@ -2022,8 +1998,7 @@ async function saveWebsiteNow() {
                         disabled={!phone}
                         onClick={() => {
                           if (!phone) return;
-                          const storeName = String(settings?.siteName || "Baggo");
-                          const msg = `Hi${customer?.name ? ` ${customer.name}` : ""}! About your ${storeName} order ${o.id}.`;
+                          const msg = `Hi${customer?.name ? ` ${customer.name}` : ""}! About your Baggo order ${o.id}.`;
                           const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
                           window.open(url, "_blank");
                         }}
