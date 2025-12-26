@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import SafeImage from "./SafeImage";
 import { getImageMeta } from "../lib/imageMeta";
@@ -141,10 +142,14 @@ export default function QuickAddSheet({
   }
 
   if (!open || !product) return null;
+  // Render in a portal so `position: fixed` is truly viewport-fixed.
+  // This avoids the "half-screen side panel" bug when this component is
+  // mounted inside a transformed/animated parent (e.g. a card with `transform`).
+  if (typeof document === "undefined" || !document.body) return null;
 
   const meta = getImageMeta(product, perImage ? activeIndex : 0);
 
-  return (
+  const sheet = (
     <div className="fixed inset-0 z-[1100]" role="dialog" aria-modal="true" aria-label="Choose options">
       {/* Backdrop */}
       <button
@@ -314,4 +319,6 @@ export default function QuickAddSheet({
       </div>
     </div>
   );
+
+  return createPortal(sheet, document.body);
 }
