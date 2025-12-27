@@ -9,11 +9,14 @@ import { createOrder } from "../lib/orders";
 import { supabaseEnabled } from "../lib/supabase";
 import SafeImage from "../components/SafeImage";
 import { getUnitPrice, hasDiscount, getBasePrice } from "../lib/pricing";
+import { useStore } from "../context/StoreContext";
 
 export default function Cart() {
   const { cart, removeFromCart, updateQuantity } = useCart();
+  const { settings } = useStore();
   const navigate = useNavigate();
   const LAST_ORDER_KEY = "BAGGO_LAST_ORDER";
+  const storeName = String(settings?.siteName || "Baggo");
   // Shipping
   const [shippingSettings, setShippingSettings] = useState(null);
   const [shippingMethod, setShippingMethod] = useState("");
@@ -166,7 +169,7 @@ export default function Cart() {
     const orderIdLine = createdOrderId ? `\nOrder ID: *${createdOrderId}*` : "";
 
     const message = `
-🛍️ *New Order — Baggo*${orderIdLine}
+🛍️ *New Order — ${storeName}*${orderIdLine}
 
 ${customerLines.length ? customerLines.join("\n") + "\n\n" : ""}${itemsText}
 
