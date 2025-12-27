@@ -101,7 +101,11 @@ export default function Cart() {
   }
 
   async function checkoutWhatsApp() {
-    const phone = "96181524632";
+    const phone = String(settings?.whatsapp || "").replace(/[^0-9]/g, "");
+    if (!phone) {
+      window.alert("WhatsApp number is not set.\nGo to Admin → Website → WhatsApp number and save it.");
+      return;
+    }
 
     const methods = shippingSettings?.methods || [];
     const selectedMethod = methods.find((m) => String(m.code) === String(shippingMethod));

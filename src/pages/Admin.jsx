@@ -1297,6 +1297,14 @@ async function saveWebsiteNow() {
                 />
               </Field>
 
+              <Field label="WhatsApp number" hint="International format, numbers only (ex: 96171234567)">
+                <TextInput
+                  value={settings.whatsapp || ""}
+                  onChange={(e) => setSettings({ whatsapp: e.target.value })}
+                  placeholder="96171234567"
+                />
+              </Field>
+
               <div className="h-px bg-[var(--color-border)]" />
 
               <h2 className="text-lg font-semibold text-[var(--color-text)]">Banner</h2>

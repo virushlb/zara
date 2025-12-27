@@ -11,6 +11,7 @@ const StoreContext = createContext(null);
 
 const DEFAULT_SETTINGS = {
   siteName: "Baggo",
+  whatsapp: "",
   banner: {
     enabled: true,
     text: "This is Baggo",
@@ -113,27 +114,43 @@ function saveLocalStore(store) {
   }
 }
 
-function mapSettingsRow(row) {
+function mapSettingsRow(siteRow, websiteRow) {
   const base = DEFAULT_SETTINGS;
-  if (!row) return base;
+  const r = siteRow || null;
+  const w = websiteRow || null;
+
+  const siteName =
+    (w && (w.site_name ?? w.siteName ?? w.name ?? w.title)) ??
+    (r && (r.site_name ?? r.siteName)) ??
+    base.siteName;
+
+  const whatsappRaw =
+    (w && (w.whatsapp ?? w.whatsapp_number ?? w.whatsapp_phone ?? w.whatsappPhone)) ??
+    (r && (r.whatsapp ?? r.whatsapp_number)) ??
+    base.whatsapp ??
+    "";
+
+  const whatsapp = String(whatsappRaw || "").trim();
+
   return {
-    siteName: row.site_name ?? base.siteName,
+    siteName,
+    whatsapp,
     banner: {
-      enabled: row.banner_enabled ?? base.banner.enabled,
-      text: row.banner_text ?? base.banner.text,
-      buttonLabel: row.banner_button_label ?? base.banner.buttonLabel,
-      buttonHref: row.banner_button_href ?? base.banner.buttonHref,
+      enabled: r?.banner_enabled ?? base.banner.enabled,
+      text: r?.banner_text ?? base.banner.text,
+      buttonLabel: r?.banner_button_label ?? base.banner.buttonLabel,
+      buttonHref: r?.banner_button_href ?? base.banner.buttonHref,
     },
     hero: {
-      badgeText: row.hero_badge_text ?? base.hero.badgeText,
-      title: row.hero_title ?? base.hero.title,
-      subtitle: row.hero_subtitle ?? base.hero.subtitle,
-      primaryCtaLabel: row.hero_primary_cta_label ?? base.hero.primaryCtaLabel,
-      primaryCtaHref: row.hero_primary_cta_href ?? base.hero.primaryCtaHref,
-      secondaryCtaLabel: row.hero_secondary_cta_label ?? base.hero.secondaryCtaLabel,
-      secondaryCtaHref: row.hero_secondary_cta_href ?? base.hero.secondaryCtaHref,
-      mainProductId: row.hero_main_product_id ?? null,
-      sideProductId: row.hero_side_product_id ?? null,
+      badgeText: r?.hero_badge_text ?? base.hero.badgeText,
+      title: r?.hero_title ?? base.hero.title,
+      subtitle: r?.hero_subtitle ?? base.hero.subtitle,
+      primaryCtaLabel: r?.hero_primary_cta_label ?? base.hero.primaryCtaLabel,
+      primaryCtaHref: r?.hero_primary_cta_href ?? base.hero.primaryCtaHref,
+      secondaryCtaLabel: r?.hero_secondary_cta_label ?? base.hero.secondaryCtaLabel,
+      secondaryCtaHref: r?.hero_secondary_cta_href ?? base.hero.secondaryCtaHref,
+      mainProductId: r?.hero_main_product_id ?? null,
+      sideProductId: r?.hero_side_product_id ?? null,
     },
   };
 }
@@ -162,6 +179,18 @@ function settingsToRow(settings) {
     hero_main_product_id: toUuidOrNull(s.hero?.mainProductId),
     hero_side_product_id: toUuidOrNull(s.hero?.sideProductId),
   };
+}
+
+function websiteSettingsToRow(settings, id) {
+  const s = settings || DEFAULT_SETTINGS;
+  const raw = String(s.whatsapp || "").trim();
+  const phone = raw.replace(/[^0-9]/g, "");
+  const row = {
+    site_name: s.siteName,
+    whatsapp: phone,
+  };
+  if (id !== undefined && id !== null) row.id = id;
+  return row;
 }
 
 function mapCategoryRow(row) {
@@ -196,18 +225,22 @@ export function StoreProvider({ children }) {
   // Prevent “flash” of default settings in cloud mode (banner/hero briefly show defaults)
   const [isReady, setIsReady] = useState(() => !supabaseEnabled);
   const persistTimerRef = useRef(null);
+  const websiteSettingsIdRef = useRef(null);
 
   const refreshFromSupabase = useCallback(async () => {
     if (!supabaseEnabled) return;
 
-    const [{ data: sRow }, { data: catRows }, { data: prodRows }] = await Promise.all([
+    const [{ data: sRow }, { data: wRow }, { data: catRows }, { data: prodRows }] = await Promise.all([
       supabase.from("site_settings").select("*").eq("id", 1).maybeSingle(),
+      supabase.from("website_settings").select("*").limit(1).maybeSingle(),
       supabase.from("categories").select("id,slug,label,visible,sort_order").order("sort_order", { ascending: true }),
       supabase.from("products").select("*").order("created_at", { ascending: false }),
     ]);
 
+    if (wRow?.id !== undefined && wRow?.id !== null) websiteSettingsIdRef.current = wRow.id;
+
     setStore({
-      settings: mapSettingsRow(sRow),
+      settings: mapSettingsRow(sRow, wRow),
       categories: Array.isArray(catRows) ? catRows.map(mapCategoryRow) : [],
       products: Array.isArray(prodRows) ? prodRows.map(mapProductRow) : [],
     });
@@ -253,6 +286,27 @@ export function StoreProvider({ children }) {
       try {
         const { error } = await supabase.from("site_settings").upsert(settingsToRow(nextSettings), { onConflict: "id" });
         if (error) throw error;
+
+        // Keep business settings (site name + WhatsApp number) in website_settings as well.
+        const wsId = websiteSettingsIdRef.current;
+        const wsPayload = websiteSettingsToRow(nextSettings, wsId ?? 1);
+        const { error: wsError } = await supabase.from("website_settings").upsert(wsPayload, { onConflict: "id" });
+
+        if (!wsError && wsPayload?.id !== undefined && wsPayload?.id !== null) {
+          websiteSettingsIdRef.current = wsPayload.id;
+        }
+
+        // If website_settings is empty or doesn't use id=1, try a plain insert once.
+        if (wsError && (wsId === undefined || wsId === null)) {
+          const { data: created, error: createErr } = await supabase
+            .from("website_settings")
+            .insert(websiteSettingsToRow(nextSettings, null))
+            .select("*")
+            .maybeSingle();
+          if (!createErr && created?.id !== undefined && created?.id !== null) {
+            websiteSettingsIdRef.current = created.id;
+          }
+        }
       } catch (e) {
         console.error("Failed to save site_settings", e);
       }
@@ -267,6 +321,27 @@ export function StoreProvider({ children }) {
       try {
         const { error } = await supabase.from("site_settings").upsert(settingsToRow(store.settings), { onConflict: "id" });
         if (error) throw error;
+
+        try {
+          const wsId = websiteSettingsIdRef.current;
+          const wsPayload = websiteSettingsToRow(store.settings, wsId ?? 1);
+          const { error: wsError } = await supabase.from("website_settings").upsert(wsPayload, { onConflict: "id" });
+          if (!wsError && wsPayload?.id !== undefined && wsPayload?.id !== null) {
+            websiteSettingsIdRef.current = wsPayload.id;
+          }
+          if (wsError && (wsId === undefined || wsId === null)) {
+            const { data: created, error: createErr } = await supabase
+              .from("website_settings")
+              .insert(websiteSettingsToRow(store.settings, null))
+              .select("*")
+              .maybeSingle();
+            if (!createErr && created?.id !== undefined && created?.id !== null) {
+              websiteSettingsIdRef.current = created.id;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to save website_settings", e);
+        }
         return { ok: true };
       } catch (e) {
         console.error("saveSettingsNow failed", e);
