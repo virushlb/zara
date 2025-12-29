@@ -9,6 +9,29 @@ import QuickAddSheet from "./QuickAddSheet";
 import { getImageMeta } from "../lib/imageMeta";
 import { getUnitPrice, hasDiscount, getBasePrice } from "../lib/pricing";
 
+
+function HeartIcon({ filled }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M12 21s-7.2-4.35-9.6-8.55C.4 9.2 2.2 6.5 5.2 6.05c1.7-.25 3.3.5 4.3 1.7 1-1.2 2.6-1.95 4.3-1.7 3 .45 4.8 3.15 2.8 6.4C19.2 16.65 12 21 12 21Z"
+        fill="currentColor"
+        fillOpacity={filled ? 1 : 0}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function ProductCard({ product }) {
   const { toggleFavorite, isFavorite } = useFavorites();
   const { addToCart } = useCart();
@@ -95,10 +118,10 @@ export default function ProductCard({ product }) {
           e.stopPropagation();
           toggleFavorite(product);
         }}
-        className="absolute top-2 right-2 z-20 text-lg baggo-tap transition-opacity md:opacity-0 md:group-hover:opacity-100"
+        className="absolute top-2 right-2 z-20 baggo-tap transition-opacity md:opacity-0 md:group-hover:opacity-100 rounded-full border border-[var(--color-border)] bg-white/70 backdrop-blur px-2.5 py-2 text-[var(--color-text)] hover:bg-white/85"
         aria-label={liked ? "Remove from favorites" : "Add to favorites"}
       >
-        {liked ? "❤️" : "🤍"}
+        <HeartIcon filled={liked} />
       </button>
 
       {/* Image (with overlay link) */}

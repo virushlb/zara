@@ -386,13 +386,16 @@ export default function Product() {
                   ))}
                 </div>
 
-                {selectedSize && (
-                  <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-                    {getMaxStockFor(product, selectedSize, variantIndex ?? null) > 0
-                      ? `Only ${getMaxStockFor(product, selectedSize, variantIndex ?? null)} left in stock`
-                      : "Out of stock"}
-                  </p>
-                )}
+                {selectedSize && (() => {
+                  const qty = getMaxStockFor(product, selectedSize, variantIndex ?? null);
+                  if (qty <= 0) return (
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">Out of stock</p>
+                  );
+                  if (qty <= 10) return (
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">Only {qty} left</p>
+                  );
+                  return null;
+                })()}
 
                 {sizeError && !selectedSize ? (
                   <p className="mt-3 text-xs text-[var(--color-danger)]">Please choose a size.</p>

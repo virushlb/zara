@@ -26,18 +26,52 @@ function SectionTitle({ title, actionLabel, actionHref }) {
 }
 
 function Collage({ images, fallback, alt }) {
-  const imgs = (images || []).filter(Boolean).slice(0, 4);
+  const unique = [];
+  const seen = new Set();
+  for (const u of (images || [])) {
+    const s = String(u || "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    unique.push(s);
+    if (unique.length >= 4) break;
+  }
 
-  if (imgs.length >= 2) {
+  const imgs = unique;
+
+  if (imgs.length >= 4) {
     return (
       <div className="grid grid-cols-2 gap-1.5 h-full w-full">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
-            <SafeImage
-              src={imgs[i] || imgs[0] || fallback}
-              alt={alt || ""}
-              className="h-full w-full object-cover"
-            />
+        {imgs.slice(0, 4).map((src, i) => (
+          <div key={src + i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+            <SafeImage src={src} alt={alt || ""} className="h-full w-full object-cover" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (imgs.length === 3) {
+    return (
+      <div className="grid grid-cols-2 gap-1.5 h-full w-full">
+        <div className="row-span-2 overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+          <SafeImage src={imgs[0]} alt={alt || ""} className="h-full w-full object-cover" />
+        </div>
+        <div className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+          <SafeImage src={imgs[1]} alt={alt || ""} className="h-full w-full object-cover" />
+        </div>
+        <div className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+          <SafeImage src={imgs[2]} alt={alt || ""} className="h-full w-full object-cover" />
+        </div>
+      </div>
+    );
+  }
+
+  if (imgs.length === 2) {
+    return (
+      <div className="grid grid-cols-2 gap-1.5 h-full w-full">
+        {imgs.map((src, i) => (
+          <div key={src + i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+            <SafeImage src={src} alt={alt || ""} className="h-full w-full object-cover" />
           </div>
         ))}
       </div>
@@ -261,6 +295,19 @@ export default function Home() {
       .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
   }, [homeHeroes]);
 
+  function dedupeImages(arr, limit = 8) {
+    const out = [];
+    const seen = new Set();
+    for (const x of arr || []) {
+      const s = String(x || "").trim();
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   function resolveCategory(quad) {
     const key = quad?.category_id ? String(quad.category_id) : "";
     if (!key) return null;
@@ -284,7 +331,7 @@ export default function Home() {
         href: `/product/${p.id}`,
         title: quad?.title || p.name,
         subtitle: `Product • $${getUnitPrice(p)}`,
-        images: [p.image, ...(p.images || [])].filter(Boolean),
+        images: dedupeImages([p.image, ...(p.images || [])], 8),
       };
     }
 
@@ -303,11 +350,11 @@ export default function Home() {
       : [];
 
     const chosen = mode === "manual" ? fromManual : auto;
-    const images = [
+    const images = dedupeImages([
       quad?.image_url,
-      ...chosen.map((p) => p.image).filter(Boolean),
-      ...(chosen.flatMap((p) => p.images || []).filter(Boolean)),
-    ].filter(Boolean);
+      ...chosen.map((p) => p.image),
+      ...chosen.flatMap((p) => p.images || []),
+    ], 12);
 
     return {
       href,
@@ -321,7 +368,7 @@ export default function Home() {
     <main className="bg-[var(--color-bg)] relative overflow-hidden">
       <div aria-hidden className="pointer-events-none absolute -top-48 -left-48 h-[620px] w-[620px] rounded-full bg-[radial-gradient(circle,rgba(15,23,42,0.10),rgba(15,23,42,0))] blur-3xl" />
       <div aria-hidden className="pointer-events-none absolute -bottom-56 -right-56 h-[760px] w-[760px] rounded-full bg-[radial-gradient(circle,rgba(15,23,42,0.08),rgba(15,23,42,0))] blur-3xl" />
-      <div className="max-w-7xl mx-auto px-6 md:px-10 pt-8 pb-16">
+      <div className="max-w-7xl mx-auto px-6 md:px-10 pt-10 md:pt-12 pb-16">
         {activeHeroes.length ? (
           <div className="space-y-14">
             {activeHeroes.map((h, idx) => (
@@ -331,7 +378,7 @@ export default function Home() {
               >
                 {/* Big image */}
                 <div className="relative">
-                  <div className="relative h-[62vh] min-h-[420px] max-h-[760px] overflow-hidden">
+                  <div className="relative h-[70vh] min-h-[460px] max-h-[820px] overflow-hidden">
                     <SafeImage
                       src={h.image_url}
                       alt={h.title || "Hero"}
@@ -342,15 +389,14 @@ export default function Home() {
                   {/* Vignette / editorial overlays */}
                   <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(900px_420px_at_20%_15%,rgba(255,255,255,0.10),rgba(255,255,255,0))]" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/0 pointer-events-none" />
+                  <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent to-[var(--color-bg)] pointer-events-none" />
 
-                  {(h.title || h.subtitle) ? (
+                  {(h.title || h.subtitle || h.primary_cta_label || h.secondary_cta_label) ? (
                     <div
                       className="absolute left-6 bottom-6 sm:left-10 sm:bottom-10 max-w-2xl lux-reveal"
                       style={{ animationDelay: `${idx * 80}ms` }}
                     >
-                      <div className="text-[11px] uppercase tracking-[0.30em] text-white/70">
-                        Collection
-                      </div>
+                      <div className="text-[11px] uppercase tracking-[0.30em] text-white/70">Collection</div>
                       {h.title ? (
                         <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-6xl leading-[1.02] tracking-tight text-white">
                           {h.title}
@@ -360,6 +406,27 @@ export default function Home() {
                         <p className="mt-3 text-sm sm:text-base text-white/85 leading-relaxed max-w-xl">
                           {h.subtitle}
                         </p>
+                      ) : null}
+
+                      {(h.primary_cta_label && h.primary_cta_href) || (h.secondary_cta_label && h.secondary_cta_href) ? (
+                        <div className="mt-5 flex flex-wrap items-center gap-3">
+                          {h.primary_cta_label && h.primary_cta_href ? (
+                            <Link
+                              to={h.primary_cta_href}
+                              className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold bg-white text-black hover:opacity-95 transition"
+                            >
+                              {h.primary_cta_label}
+                            </Link>
+                          ) : null}
+                          {h.secondary_cta_label && h.secondary_cta_href ? (
+                            <Link
+                              to={h.secondary_cta_href}
+                              className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold border border-white/40 bg-black/10 text-white hover:bg-white/10 transition"
+                            >
+                              {h.secondary_cta_label}
+                            </Link>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -372,7 +439,7 @@ export default function Home() {
                 </div>
 
                 {/* 4 quads */}
-                <div className="p-4 sm:p-7 bg-[linear-gradient(180deg,rgba(255,255,255,1),rgba(255,255,255,0.96))]">
+                <div className="relative -mt-10 sm:-mt-14 p-4 sm:p-7 bg-[linear-gradient(180deg,rgba(255,255,255,1),rgba(255,255,255,0.96))] rounded-t-[2.5rem]">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-7">
                     {(h.quads || []).slice(0, 4).map((q, qi) => {
                       const view = resolveQuadView(q);
@@ -394,26 +461,7 @@ export default function Home() {
             ))}
           </div>
         ) : (
-          <div className="space-y-10">
-            <div className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 sm:p-8 shadow-sm lux-reveal">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--color-text)]">Homepage builder is ready</p>
-                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                    No fashion heroes have been created yet. Add your first hero (big image + 4 quads) from the Admin.
-                  </p>
-                </div>
-                <Link
-                  to="/admin"
-                  className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-95 transition"
-                >
-                  Go to Admin → Home
-                </Link>
-              </div>
-            </div>
-
-            <LegacyCollections products={products || []} categories={categories || []} hero={hero} />
-          </div>
+          <LegacyCollections products={products || []} categories={categories || []} hero={hero} />
         )}
 
         {/* Featured */}

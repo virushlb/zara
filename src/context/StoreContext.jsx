@@ -694,7 +694,7 @@ export function StoreProvider({ children }) {
     }
 
     // Home heroes (fashion homepage blocks)
-    async function createHomeHero({ title, subtitle, image_url }) {
+    async function createHomeHero({ title, subtitle, image_url, position, is_active, primary_cta_label, primary_cta_href, secondary_cta_label, secondary_cta_href }) {
       if (!supabaseEnabled) {
         setStore((prev) => {
           const next = { ...prev };
@@ -703,8 +703,12 @@ export function StoreProvider({ children }) {
             title: title || "",
             subtitle: subtitle || "",
             image_url: image_url || "",
-            position: (prev.homeHeroes?.length || 0) + 1,
-            is_active: true,
+            primary_cta_label: String(primary_cta_label || ""),
+            primary_cta_href: String(primary_cta_href || ""),
+            secondary_cta_label: String(secondary_cta_label || ""),
+            secondary_cta_href: String(secondary_cta_href || ""),
+            position: Number(position || 0) || ((prev.homeHeroes?.length || 0) + 1),
+            is_active: is_active !== false,
             quads: [1, 2, 3, 4].map((pos) => ({
               id: `local-quad-${pos}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
               hero_id: null,
@@ -725,18 +729,48 @@ export function StoreProvider({ children }) {
       }
 
       try {
-        const { data: created, error } = await supabase
-          .from("heroes")
-          .insert({
-            title: String(title || ""),
-            subtitle: String(subtitle || ""),
-            image_url: String(image_url || ""),
-            position: (store.homeHeroes?.length || 0) + 1,
-            is_active: true,
-          })
-          .select("*")
-          .maybeSingle();
-        if (error) throw error;
+        let created = null;
+        {
+          const { data, error } = await supabase
+            .from("heroes")
+            .insert({
+              title: String(title || ""),
+              subtitle: String(subtitle || ""),
+              image_url: String(image_url || ""),
+              primary_cta_label: String(primary_cta_label || ""),
+              primary_cta_href: String(primary_cta_href || ""),
+              secondary_cta_label: String(secondary_cta_label || ""),
+              secondary_cta_href: String(secondary_cta_href || ""),
+              position: Number(position || 0) || ((store.homeHeroes?.length || 0) + 1),
+              is_active: is_active !== false,
+            })
+            .select("*")
+            .maybeSingle();
+          if (error) {
+            const msg = String(error?.message || "");
+            // If the DB wasn't migrated yet, retry without CTA columns so the hero still creates.
+            if (msg.toLowerCase().includes("column") && msg.toLowerCase().includes("cta")) {
+              const { data: data2, error: error2 } = await supabase
+                .from("heroes")
+                .insert({
+                  title: String(title || ""),
+                  subtitle: String(subtitle || ""),
+                  image_url: String(image_url || ""),
+                  position: Number(position || 0) || ((store.homeHeroes?.length || 0) + 1),
+                  is_active: is_active !== false,
+                })
+                .select("*")
+                .maybeSingle();
+              if (error2) throw error2;
+              created = data2;
+            } else {
+              throw error;
+            }
+          } else {
+            created = data;
+          }
+        }
+        if (!created?.id) throw new Error("Failed to create hero");
         if (created?.id) {
           const quads = [1, 2, 3, 4].map((pos) => ({
             hero_id: created.id,
@@ -777,7 +811,21 @@ export function StoreProvider({ children }) {
         if (payload.position !== undefined) payload.position = Number(payload.position || 0);
         if (payload.is_active !== undefined) payload.is_active = Boolean(payload.is_active);
         const { error } = await supabase.from("heroes").update(payload).eq("id", idStr);
-        if (error) throw error;
+        if (error) {
+          const msg = String(error?.message || "");
+          // If the DB wasn't migrated yet, retry without CTA columns so other edits still save.
+          if (msg.toLowerCase().includes("column") && msg.toLowerCase().includes("cta")) {
+            const p2 = { ...payload };
+            delete p2.primary_cta_label;
+            delete p2.primary_cta_href;
+            delete p2.secondary_cta_label;
+            delete p2.secondary_cta_href;
+            const { error: error2 } = await supabase.from("heroes").update(p2).eq("id", idStr);
+            if (error2) throw error2;
+          } else {
+            throw error;
+          }
+        }
         await refreshFromSupabase();
         return { ok: true };
       } catch (e) {

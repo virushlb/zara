@@ -99,22 +99,7 @@ export default function Admin() {
 
   const MAX_IMAGES = 10;
 
-  // Default to the Home builder so new clients immediately see the fashion homepage system.
-  const [tab, setTab] = useState(() => {
-    try {
-      return window.localStorage.getItem("BAGGO_ADMIN_TAB") || "home";
-    } catch {
-      return "home";
-    }
-  });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("BAGGO_ADMIN_TAB", tab);
-    } catch {
-      // ignore
-    }
-  }, [tab]);
+  const [tab, setTab] = useState("products");
   const [catDraft, setCatDraft] = useState({ label: "", slug: "", category_type: "normal", password: "" });
   const [catEditingSlug, setCatEditingSlug] = useState(null);
 
@@ -158,6 +143,10 @@ export default function Admin() {
     open: false,
     title: "",
     subtitle: "",
+    primary_cta_label: "",
+    primary_cta_href: "",
+    secondary_cta_label: "",
+    secondary_cta_href: "",
     image_url: "",
     file: null,
     busy: false,
@@ -360,6 +349,38 @@ const draftImageLines = useMemo(() => {
   
   const stockPerImageMode = useMemo(() => isPerImageStock(draft?.stock), [draft?.stock]);
 
+  // Auto-enable per-image stock when a product has multiple images
+  useEffect(() => {
+    if (!draft) return;
+    const imgLen = (draftImageLines || []).length;
+    if (imgLen <= 1) return;
+    setDraft((d) => {
+      if (!d) return d;
+      if (isPerImageStock(d.stock)) {
+        // ensure sizes are synced
+        const synced = ensureVariantStockKeys(d.stock, sizeList, imgLen);
+        return synced === d.stock ? d : { ...d, stock: synced };
+      }
+      const next = legacyToPerImageStock(d.stock, imgLen, sizeList);
+      return { ...d, stock: next };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftImageLines?.length]);
+
+  // Keep per-image stock keys synced when sizes change
+  useEffect(() => {
+    if (!draft) return;
+    if (!isPerImageStock(draft.stock)) return;
+    const imgLen = (draftImageLines || []).length || 1;
+    setDraft((d) => {
+      if (!d) return d;
+      if (!isPerImageStock(d.stock)) return d;
+      const synced = ensureVariantStockKeys(d.stock, sizeList, imgLen);
+      return synced === d.stock ? d : { ...d, stock: synced };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.sizes]);
+
   const parseImageLines = (val) =>
     String(val || "")
       .split("\n")
@@ -406,6 +427,68 @@ const draftImageLines = useMemo(() => {
 
       return { ...d, stock: st };
     });
+  }
+
+
+  function toInt(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }
+
+  function legacyToPerImageStock(rawStock, imageLen, sizes) {
+    const st = rawStock && typeof rawStock === "object" ? { ...rawStock } : {};
+    if (isPerImageStock(st)) return st;
+
+    const meta = Array.isArray(st.__image_meta) ? st.__image_meta : [];
+    const keepDiscount = st.__discount_price;
+
+    // Legacy stock values (per-size) live at root keys.
+    const legacyPerSize = {
+      ...Object.fromEntries(
+        (sizes || []).map((s) => [s, toInt(st?.[s])])
+      ),
+    };
+
+    const variants = Array.from({ length: Math.max(1, Number(imageLen || 1)) }).map((_, i) => {
+      const m = meta[i] || {};
+      const baseStock = {};
+      for (const s of (sizes || [])) {
+        baseStock[s] = i == 0 ? toInt(legacyPerSize[s]) : 0;
+      }
+      return {
+        name: String(m?.name || ""),
+        description: String(m?.description || ""),
+        stock: baseStock,
+      };
+    });
+
+    const next = { __mode: "per_image", variants };
+    if (keepDiscount !== undefined) next.__discount_price = keepDiscount;
+    return next;
+  }
+
+  function ensureVariantStockKeys(rawStock, sizes, imageLen) {
+    const st = rawStock && typeof rawStock === "object" ? { ...rawStock } : {};
+    if (!isPerImageStock(st)) return st;
+    const vars = Array.isArray(st.variants) ? [...st.variants] : [];
+    const len = Math.max(1, Number(imageLen || vars.length || 1));
+    while (vars.length < len) vars.push({ name: "", description: "", stock: {} });
+    if (vars.length > len) vars.length = len;
+
+    const sz = Array.isArray(sizes) ? sizes : [];
+    const nextVars = vars.map((v) => {
+      const stock = v && typeof v === "object" && v.stock && typeof v.stock === "object" ? { ...v.stock } : {};
+      for (const s of sz) {
+        if (stock[s] === undefined) stock[s] = 0;
+      }
+      // Also remove old sizes that no longer exist
+      for (const k of Object.keys(stock)) {
+        if (!sz.includes(k)) delete stock[k];
+      }
+      return { ...(v || {}), stock };
+    });
+
+    return { ...st, variants: nextVars };
   }
 const categoryCounts = useMemo(() => {
     const counts = {};
@@ -623,9 +706,8 @@ const categoryCounts = useMemo(() => {
   }
 
   function startCreateHero() {
-    setHomeCreate({ open: true, title: "", subtitle: "", image_url: "", file: null, busy: false, error: "" });
+    setHomeCreate({ open: true, title: "", subtitle: "", primary_cta_label: "", primary_cta_href: "", secondary_cta_label: "", secondary_cta_href: "", image_url: "", file: null, busy: false, error: "" });
   }
-
   function closeCreateHero() {
     setHomeCreate((s) => ({ ...s, open: false, busy: false, error: "" }));
   }
@@ -751,6 +833,10 @@ Fix: In Supabase → Storage, create a bucket named "${storageBucket}" (public),
         title: String(homeCreate.title || "").trim(),
         subtitle: String(homeCreate.subtitle || "").trim(),
         image_url: imageUrl,
+        primary_cta_label: String(homeCreate.primary_cta_label || "").trim(),
+        primary_cta_href: String(homeCreate.primary_cta_href || "").trim(),
+        secondary_cta_label: String(homeCreate.secondary_cta_label || "").trim(),
+        secondary_cta_href: String(homeCreate.secondary_cta_href || "").trim(),
         position: (homeHeroes || []).length + 1,
         is_active: true,
       });
@@ -773,6 +859,10 @@ Fix: In Supabase → Storage, create a bucket named "${storageBucket}" (public),
         title: String(h.title || "").trim(),
         subtitle: String(h.subtitle || "").trim(),
         image_url: String(h.image_url || "").trim(),
+        primary_cta_label: String(h.primary_cta_label || "").trim(),
+        primary_cta_href: String(h.primary_cta_href || "").trim(),
+        secondary_cta_label: String(h.secondary_cta_label || "").trim(),
+        secondary_cta_href: String(h.secondary_cta_href || "").trim(),
         position: Number(h.position || 0),
         is_active: h.is_active !== false,
       });
@@ -1012,7 +1102,7 @@ async function saveWebsiteNow() {
           <div>
             <h1 className="text-3xl font-semibold text-[var(--color-text)]">Admin</h1>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Admin — manage products, categories, website settings, and the <span className="font-medium">fashion homepage</span> (Heroes + 4 Quads).
+              Normal Admin (free) — products, categories, banner, hero, and website name.
             </p>
           </div>
 
@@ -1041,10 +1131,6 @@ async function saveWebsiteNow() {
         </div>
 
         <div className="mt-8 flex flex-wrap gap-2">
-          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
-            ✨ Home <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs border border-[var(--color-border)] bg-[var(--color-bg)]">Heroes</span>
-          </TabButton>
-
           <TabButton active={tab === "products"} onClick={() => setTab("products")}>
             Products
           </TabButton>
@@ -1053,6 +1139,9 @@ async function saveWebsiteNow() {
           </TabButton>
           <TabButton active={tab === "website"} onClick={() => setTab("website")}>
             Website
+          </TabButton>
+          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
+            Home
           </TabButton>
           {cloudMode ? (
             <TabButton active={tab === "promos"} onClick={() => setTab("promos")}>
@@ -1243,7 +1332,7 @@ async function saveWebsiteNow() {
                     />
                   </Field>
 
-                  {sizeList.length > 0 && (
+                  {sizeList.length > 0 && !stockPerImageMode && (
                     <div>
                       <p className="text-sm font-medium text-[var(--color-text)] mb-2">Stock per size</p>
                       <div className="grid grid-cols-2 gap-3">
@@ -1267,6 +1356,15 @@ async function saveWebsiteNow() {
                       </div>
                     </div>
                   )}
+
+                  {sizeList.length > 0 && stockPerImageMode ? (
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                      <p className="text-sm font-medium text-[var(--color-text)]">Variant stock (per image)</p>
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        Each image below has its own stock per size (recommended for fashion variants).
+                      </p>
+                    </div>
+                  ) : null}
 
                   <Field
                     label="Images"
@@ -1423,6 +1521,46 @@ async function saveWebsiteNow() {
                 placeholder={idx === 0 ? "Description (optional)" : "Description (optional — defaults to image 1)"}
                 className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/25 min-h-[72px] resize-y"
               />
+
+              {stockPerImageMode && sizeList.length > 0 ? (
+                <div className="mt-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-[var(--color-text)]">Stock</p>
+                    <p className="text-[10px] text-[var(--color-text-muted)]">Per size</p>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {sizeList.map((s) => {
+                      const qty = toInt(draft?.stock?.variants?.[idx]?.stock?.[s]);
+                      return (
+                        <label key={s} className="text-xs">
+                          <span className="text-[var(--color-text-muted)]">{s}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={qty}
+                            onChange={(e) => {
+                              const v = toInt(e.target.value);
+                              setDraft((d) => {
+                                if (!d) return d;
+                                let st = ensureVariantStockKeys(d.stock, sizeList, draftImageLines.length);
+                                if (!isPerImageStock(st)) return d;
+                                const vars = Array.isArray(st.variants) ? [...st.variants] : [];
+                                const cur = vars[idx] || { name: "", description: "", stock: {} };
+                                const sMap = cur.stock && typeof cur.stock === "object" ? { ...cur.stock } : {};
+                                sMap[s] = v;
+                                vars[idx] = { ...cur, stock: sMap };
+                                st = { ...st, variants: vars };
+                                return { ...d, stock: st };
+                              });
+                            }}
+                            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-[var(--color-primary)]/25"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         );
@@ -1556,6 +1694,29 @@ async function saveWebsiteNow() {
                 <Field label="Subtitle" hint="Optional">
                   <TextArea value={homeCreate.subtitle} onChange={(e) => setHomeCreate((s) => ({ ...s, subtitle: e.target.value }))} rows={3} />
                 </Field>
+                <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Hero buttons</p>
+                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">Optional. Leave blank to hide.</p>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <Field label="Primary button text">
+                      <TextInput value={homeCreate.primary_cta_label} onChange={(e) => setHomeCreate((s) => ({ ...s, primary_cta_label: e.target.value }))} placeholder="e.g. Shop Now" />
+                    </Field>
+                    <Field label="Primary button link">
+                      <TextInput value={homeCreate.primary_cta_href} onChange={(e) => setHomeCreate((s) => ({ ...s, primary_cta_href: e.target.value }))} placeholder="/shop or /category/slug" />
+                    </Field>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <Field label="Secondary button text">
+                      <TextInput value={homeCreate.secondary_cta_label} onChange={(e) => setHomeCreate((s) => ({ ...s, secondary_cta_label: e.target.value }))} placeholder="e.g. View Collection" />
+                    </Field>
+                    <Field label="Secondary button link">
+                      <TextInput value={homeCreate.secondary_cta_href} onChange={(e) => setHomeCreate((s) => ({ ...s, secondary_cta_href: e.target.value }))} placeholder="/favorites or /category/slug" />
+                    </Field>
+                  </div>
+                </div>
+
                 <Field label="Hero image" hint={cloudMode ? `Uploads to ${storageBucket}` : "Demo mode preview"}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <TextInput
@@ -1617,6 +1778,25 @@ async function saveWebsiteNow() {
                         <Field label="Subtitle" hint="Optional">
                           <TextArea value={homeEdit.hero.subtitle || ""} onChange={(e) => patchHero({ subtitle: e.target.value })} rows={3} />
                         </Field>
+                        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                          <p className="text-sm font-medium text-[var(--color-text)]">Hero buttons</p>
+                          <p className="mt-1 text-xs text-[var(--color-text-muted)]">Optional. Leave label empty to hide a button.</p>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            <Field label="Primary button text">
+                              <TextInput value={homeEdit.hero.primary_cta_label || ""} onChange={(e) => patchHero({ primary_cta_label: e.target.value })} placeholder="e.g. Shop collection" />
+                            </Field>
+                            <Field label="Primary button link">
+                              <TextInput value={homeEdit.hero.primary_cta_href || ""} onChange={(e) => patchHero({ primary_cta_href: e.target.value })} placeholder="/shop or /category/slug" />
+                            </Field>
+                            <Field label="Secondary button text">
+                              <TextInput value={homeEdit.hero.secondary_cta_label || ""} onChange={(e) => patchHero({ secondary_cta_label: e.target.value })} placeholder="e.g. New arrivals" />
+                            </Field>
+                            <Field label="Secondary button link">
+                              <TextInput value={homeEdit.hero.secondary_cta_href || ""} onChange={(e) => patchHero({ secondary_cta_href: e.target.value })} placeholder="/shop or /category/slug" />
+                            </Field>
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                           <Field label="Position" hint="Lower shows first">
                             <TextInput type="number" value={homeEdit.hero.position || 0} onChange={(e) => patchHero({ position: Number(e.target.value) })} />
