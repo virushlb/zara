@@ -85,6 +85,12 @@ export default function Admin() {
     upsertProduct,
     deleteProduct,
     resetStore,
+    homeHeroes,
+    createHomeHero,
+    updateHomeHero,
+    deleteHomeHero,
+    saveHeroQuad,
+    setHeroQuadManualProducts,
     supabaseEnabled: storeSupabaseEnabled,
   } = useStore();
 
@@ -93,8 +99,24 @@ export default function Admin() {
 
   const MAX_IMAGES = 10;
 
-  const [tab, setTab] = useState("products");
-  const [catDraft, setCatDraft] = useState({ label: "", slug: "" });
+  // Default to the Home builder so new clients immediately see the fashion homepage system.
+  const [tab, setTab] = useState(() => {
+    try {
+      return window.localStorage.getItem("BAGGO_ADMIN_TAB") || "home";
+    } catch {
+      return "home";
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("BAGGO_ADMIN_TAB", tab);
+    } catch {
+      // ignore
+    }
+  }, [tab]);
+  const [catDraft, setCatDraft] = useState({ label: "", slug: "", category_type: "normal", password: "" });
+  const [catEditingSlug, setCatEditingSlug] = useState(null);
 
   // Image helper (adds a single image URL line to the textarea)
   const [imageUrlDraft, setImageUrlDraft] = useState("");
@@ -130,6 +152,26 @@ export default function Admin() {
   // Website save button status
   const [websiteSaveMsg, setWebsiteSaveMsg] = useState("");
   const [websiteSaving, setWebsiteSaving] = useState(false);
+
+  // Home heroes editor
+  const [homeCreate, setHomeCreate] = useState({
+    open: false,
+    title: "",
+    subtitle: "",
+    image_url: "",
+    file: null,
+    busy: false,
+    error: "",
+  });
+  const [homeEdit, setHomeEdit] = useState({
+    open: false,
+    heroId: null,
+    hero: null,
+    quads: [],
+    busy: false,
+    error: "",
+  });
+  const [homeUploadBusy, setHomeUploadBusy] = useState({});
 
   const ordersStatusCounts = useMemo(() => {
     const counts = { all: 0, new: 0, preparing: 0, delivered: 0, canceled: 0 };
@@ -561,6 +603,217 @@ const categoryCounts = useMemo(() => {
 
     cancelEdit();
   }
+  // Upload a single image file and return its public URL.
+  async function uploadSingleImage(file, folder = "home") {
+    if (!file) return "";
+    if (!cloudMode) return URL.createObjectURL(file);
+
+    const bucket = storageBucket;
+    const safeName = String(file.name || "image").replace(/[^a-zA-Z0-9._-]/g, "-");
+    const path = `${folder}/${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
+    const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+    });
+    if (upErr) throw upErr;
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    const u = data?.publicUrl || "";
+    if (!u) throw new Error("Upload succeeded but could not get a public URL. Is the bucket public?");
+    return u;
+  }
+
+  function startCreateHero() {
+    setHomeCreate({ open: true, title: "", subtitle: "", image_url: "", file: null, busy: false, error: "" });
+  }
+
+  function closeCreateHero() {
+    setHomeCreate((s) => ({ ...s, open: false, busy: false, error: "" }));
+  }
+
+  function openHeroEditor(heroId) {
+    const h = (homeHeroes || []).find((x) => String(x.id) === String(heroId)) || null;
+    if (!h) return;
+    const quadsSorted = Array.isArray(h.quads) ? h.quads.slice().sort((a, b) => Number(a.position) - Number(b.position)) : [];
+    const byPos = new Map(quadsSorted.map((q) => [Number(q.position || 0), q]));
+    const full = [1, 2, 3, 4].map((pos) => {
+      const q = byPos.get(pos);
+      return q
+        ? { ...q }
+        : {
+            id: null,
+            hero_id: h.id,
+            position: pos,
+            quad_type: "editorial",
+            title: "",
+            image_url: "",
+            category_id: null,
+            product_id: null,
+            product_mode: "auto",
+            manual_product_ids: [],
+          };
+    });
+    setHomeEdit({ open: true, heroId: h.id, hero: { ...h }, quads: full, busy: false, error: "" });
+  }
+
+  function closeHeroEditor() {
+    setHomeEdit({ open: false, heroId: null, hero: null, quads: [], busy: false, error: "" });
+  }
+
+  function patchHero(patch) {
+    setHomeEdit((s) => ({ ...s, hero: s.hero ? { ...s.hero, ...patch } : s.hero }));
+  }
+
+  function patchQuad(position, patch) {
+    setHomeEdit((s) => ({
+      ...s,
+      quads: (s.quads || []).map((q) => (Number(q.position) === Number(position) ? { ...q, ...patch } : q)),
+    }));
+  }
+
+  function addManualProductToQuad(position, productId) {
+    const pid = String(productId || "");
+    if (!pid) return;
+    setHomeEdit((s) => {
+      const quads = (s.quads || []).map((q) => {
+        if (Number(q.position) !== Number(position)) return q;
+        const list = Array.isArray(q.manual_product_ids) ? [...q.manual_product_ids] : [];
+        if (list.includes(pid)) return q;
+        list.push(pid);
+        return { ...q, manual_product_ids: list };
+      });
+      return { ...s, quads };
+    });
+  }
+
+  function removeManualProductFromQuad(position, productId) {
+    const pid = String(productId || "");
+    setHomeEdit((s) => {
+      const quads = (s.quads || []).map((q) => {
+        if (Number(q.position) !== Number(position)) return q;
+        const list = Array.isArray(q.manual_product_ids) ? q.manual_product_ids.filter((x) => String(x) !== pid) : [];
+        return { ...q, manual_product_ids: list };
+      });
+      return { ...s, quads };
+    });
+  }
+
+  function moveManualProduct(position, index, dir) {
+    setHomeEdit((s) => {
+      const quads = (s.quads || []).map((q) => {
+        if (Number(q.position) !== Number(position)) return q;
+        const list = Array.isArray(q.manual_product_ids) ? [...q.manual_product_ids] : [];
+        const next = index + dir;
+        if (index < 0 || index >= list.length) return q;
+        if (next < 0 || next >= list.length) return q;
+        const tmp = list[index];
+        list[index] = list[next];
+        list[next] = tmp;
+        return { ...q, manual_product_ids: list };
+      });
+      return { ...s, quads };
+    });
+  }
+
+  async function uploadHomeImage(key, file, folder, onUrl) {
+    if (!file) return;
+    const k = String(key || "");
+    setHomeUploadBusy((m) => ({ ...m, [k]: true }));
+    try {
+      const url = await uploadSingleImage(file, folder);
+      onUrl(url);
+    } catch (e) {
+      console.error(e);
+      const msg = String(e?.message || "Failed to upload image");
+      const lower = msg.toLowerCase();
+      if (lower.includes("bucket") && lower.includes("not found")) {
+        window.alert(`Upload failed: bucket "${storageBucket}" not found.
+
+Fix: In Supabase → Storage, create a bucket named "${storageBucket}" (public), OR set VITE_SUPABASE_STORAGE_BUCKET to your existing bucket name and redeploy.`);
+      } else {
+        window.alert(msg);
+      }
+    } finally {
+      setHomeUploadBusy((m) => ({ ...m, [k]: false }));
+    }
+  }
+
+  async function createHeroNow() {
+    if (homeCreate.busy) return;
+    setHomeCreate((s) => ({ ...s, busy: true, error: "" }));
+    try {
+      let imageUrl = String(homeCreate.image_url || "").trim();
+      if (!imageUrl && homeCreate.file) {
+        imageUrl = await uploadSingleImage(homeCreate.file, "home");
+      }
+      if (!imageUrl) throw new Error("Hero image is required");
+
+      const res = await createHomeHero({
+        title: String(homeCreate.title || "").trim(),
+        subtitle: String(homeCreate.subtitle || "").trim(),
+        image_url: imageUrl,
+        position: (homeHeroes || []).length + 1,
+        is_active: true,
+      });
+      if (!res?.ok) throw new Error(res?.error || "Failed to create hero");
+      closeCreateHero();
+    } catch (e) {
+      setHomeCreate((s) => ({ ...s, error: String(e?.message || "Failed") }));
+    } finally {
+      setHomeCreate((s) => ({ ...s, busy: false }));
+    }
+  }
+
+  async function saveHeroEditorNow() {
+    if (homeEdit.busy) return;
+    if (!homeEdit.heroId || !homeEdit.hero) return;
+    setHomeEdit((s) => ({ ...s, busy: true, error: "" }));
+    try {
+      const h = homeEdit.hero;
+      const heroRes = await updateHomeHero(homeEdit.heroId, {
+        title: String(h.title || "").trim(),
+        subtitle: String(h.subtitle || "").trim(),
+        image_url: String(h.image_url || "").trim(),
+        position: Number(h.position || 0),
+        is_active: h.is_active !== false,
+      });
+      if (!heroRes?.ok) throw new Error(heroRes?.error || "Failed to save hero");
+
+      for (const q of homeEdit.quads || []) {
+        const qType = String(q.quad_type || "editorial");
+        const quadPayload = {
+          id: q.id,
+          hero_id: homeEdit.heroId,
+          position: Number(q.position || 1),
+          quad_type: qType,
+          title: String(q.title || ""),
+          image_url: String(q.image_url || ""),
+          category_id: qType === "category" || qType === "editorial" ? (q.category_id || null) : null,
+          product_id: qType === "product" ? (q.product_id || null) : null,
+          product_mode: qType === "category" ? String(q.product_mode || "auto") : null,
+        };
+
+        const quadRes = await saveHeroQuad(quadPayload);
+        if (!quadRes?.ok) throw new Error(quadRes?.error || `Failed to save quad ${q.position}`);
+        const quadId = quadRes.id || q.id;
+
+        if (quadId) {
+          if (qType === "category" && String(q.product_mode || "auto") === "manual") {
+            const ids = Array.isArray(q.manual_product_ids) ? q.manual_product_ids : [];
+            await setHeroQuadManualProducts(quadId, ids);
+          } else {
+            await setHeroQuadManualProducts(quadId, []);
+          }
+        }
+      }
+
+      closeHeroEditor();
+    } catch (e) {
+      setHomeEdit((s) => ({ ...s, error: String(e?.message || "Failed") }));
+    } finally {
+      setHomeEdit((s) => ({ ...s, busy: false }));
+    }
+  }
+
   async function addImageToDraft(opts = {}) {
   if (!draft) return;
   if (imageBusy) return;
@@ -759,7 +1012,7 @@ async function saveWebsiteNow() {
           <div>
             <h1 className="text-3xl font-semibold text-[var(--color-text)]">Admin</h1>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Normal Admin (free) — products, categories, banner, hero, and website name.
+              Admin — manage products, categories, website settings, and the <span className="font-medium">fashion homepage</span> (Heroes + 4 Quads).
             </p>
           </div>
 
@@ -788,6 +1041,10 @@ async function saveWebsiteNow() {
         </div>
 
         <div className="mt-8 flex flex-wrap gap-2">
+          <TabButton active={tab === "home"} onClick={() => setTab("home")}>
+            ✨ Home <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs border border-[var(--color-border)] bg-[var(--color-bg)]">Heroes</span>
+          </TabButton>
+
           <TabButton active={tab === "products"} onClick={() => setTab("products")}>
             Products
           </TabButton>
@@ -1196,11 +1453,351 @@ async function saveWebsiteNow() {
           </div>
         )}
 
+        {/* HOME (HEROES + QUADS) */}
+        {tab === "home" && (
+          <div className="mt-8 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-[var(--color-text)]">Home heroes</h2>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  Add multiple hero sections. Each hero has a big image and 4 editable quads under it.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={startCreateHero}
+                className="rounded-full px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-95 transition"
+              >
+                + New hero
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+              <div className="p-6 border-b border-[var(--color-border)]">
+                <p className="text-sm text-[var(--color-text-muted)]">{(homeHeroes || []).length} hero{(homeHeroes || []).length === 1 ? "" : "es"}</p>
+              </div>
+              <div className="divide-y divide-[var(--color-border)]">
+                {(homeHeroes || [])
+                  .slice()
+                  .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+                  .map((h) => (
+                    <div key={h.id} className="p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <div className="h-16 w-16 rounded-2xl overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-2)] shrink-0">
+                          {h.image_url ? <SafeImage src={h.image_url} alt={h.title || "Hero"} className="h-full w-full object-cover" /> : null}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-[var(--color-text)] truncate">
+                            {h.title || "(Untitled hero)"}
+                            {h.is_active === false ? (
+                              <span className="ml-2 text-xs text-[var(--color-text-muted)]">• Disabled</span>
+                            ) : null}
+                          </p>
+                          <p className="text-sm text-[var(--color-text-muted)] truncate">
+                            Position: {Number(h.position || 0)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openHeroEditor(h.id)}
+                          className="rounded-full px-3 py-1.5 text-sm border border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-surface-2)] transition"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!window.confirm(`Delete this hero?\n\nThis will also delete its 4 quads.`)) return;
+                            deleteHomeHero(h.id);
+                          }}
+                          className="rounded-full px-3 py-1.5 text-sm border border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-red-50 hover:border-red-200 transition"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* Create hero modal */}
+            <Modal
+              open={homeCreate.open}
+              title="New hero"
+              onClose={closeCreateHero}
+              widthClass="max-w-xl"
+              footer={
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeCreateHero}
+                    className="rounded-lg px-4 py-2 text-sm border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={createHeroNow}
+                    disabled={homeCreate.busy}
+                    className="rounded-lg px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-50"
+                  >
+                    {homeCreate.busy ? "Creating..." : "Create"}
+                  </button>
+                </div>
+              }
+            >
+              <div className="space-y-4">
+                <Field label="Title" hint="Optional">
+                  <TextInput value={homeCreate.title} onChange={(e) => setHomeCreate((s) => ({ ...s, title: e.target.value }))} />
+                </Field>
+                <Field label="Subtitle" hint="Optional">
+                  <TextArea value={homeCreate.subtitle} onChange={(e) => setHomeCreate((s) => ({ ...s, subtitle: e.target.value }))} rows={3} />
+                </Field>
+                <Field label="Hero image" hint={cloudMode ? `Uploads to ${storageBucket}` : "Demo mode preview"}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TextInput
+                      value={homeCreate.image_url}
+                      onChange={(e) => setHomeCreate((s) => ({ ...s, image_url: e.target.value }))}
+                      placeholder="Image URL (or choose file)"
+                    />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                        e.target.value = "";
+                        setHomeCreate((s) => ({ ...s, file: f }));
+                      }}
+                      className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-sm"
+                    />
+                  </div>
+                </Field>
+                {homeCreate.error ? <p className="text-sm text-red-600">{homeCreate.error}</p> : null}
+              </div>
+            </Modal>
+
+            {/* Edit hero modal */}
+            <Modal
+              open={homeEdit.open}
+              title="Edit hero"
+              onClose={closeHeroEditor}
+              widthClass="max-w-4xl"
+              footer={
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeHeroEditor}
+                    className="rounded-lg px-4 py-2 text-sm border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveHeroEditorNow}
+                    disabled={homeEdit.busy}
+                    className="rounded-lg px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-50"
+                  >
+                    {homeEdit.busy ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              }
+            >
+              {homeEdit.hero ? (
+                <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+                      <p className="text-sm font-semibold text-[var(--color-text)]">Hero</p>
+                      <div className="mt-4 space-y-4">
+                        <Field label="Title" hint="Optional">
+                          <TextInput value={homeEdit.hero.title || ""} onChange={(e) => patchHero({ title: e.target.value })} />
+                        </Field>
+                        <Field label="Subtitle" hint="Optional">
+                          <TextArea value={homeEdit.hero.subtitle || ""} onChange={(e) => patchHero({ subtitle: e.target.value })} rows={3} />
+                        </Field>
+                        <div className="grid grid-cols-2 gap-4">
+                          <Field label="Position" hint="Lower shows first">
+                            <TextInput type="number" value={homeEdit.hero.position || 0} onChange={(e) => patchHero({ position: Number(e.target.value) })} />
+                          </Field>
+                          <label className="flex items-center gap-2 text-sm mt-7">
+                            <input type="checkbox" checked={homeEdit.hero.is_active !== false} onChange={(e) => patchHero({ is_active: e.target.checked })} />
+                            Active
+                          </label>
+                        </div>
+                        <Field label="Image" hint={cloudMode ? `Uploads to ${storageBucket}` : "Demo mode preview"}>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <TextInput value={homeEdit.hero.image_url || ""} onChange={(e) => patchHero({ image_url: e.target.value })} placeholder="Image URL" />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                                e.target.value = "";
+                                uploadHomeImage(`hero-${homeEdit.heroId}`, f, "home", (url) => patchHero({ image_url: url }));
+                              }}
+                              className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-sm"
+                            />
+                          </div>
+                          {homeUploadBusy[`hero-${homeEdit.heroId}`] ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">Uploading...</p> : null}
+                        </Field>
+                      </div>
+                    </div>
+
+                    {homeEdit.error ? <p className="text-sm text-red-600">{homeEdit.error}</p> : null}
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Quads (4)</p>
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                      Product quads link to a product page. Photo / category quads link to the chosen category.
+                    </p>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      {(homeEdit.quads || []).slice(0, 4).map((q) => {
+                        const pos = Number(q.position || 1);
+                        const qType = String(q.quad_type || "editorial");
+                        const selectedCat = (categories || []).find((c) => String(c.id) === String(q.category_id)) || null;
+                        const filterSlug = selectedCat?.slug || "";
+                        const allowedProducts = filterSlug ? (products || []).filter((p) => String(p.category) === filterSlug) : (products || []);
+
+                        return (
+                          <div key={pos} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                            <p className="text-sm font-semibold text-[var(--color-text)]">Quad {pos}</p>
+                            <div className="mt-3 space-y-3">
+                              <Field label="Type">
+                                <Select
+                                  value={qType}
+                                  onChange={(e) => {
+                                    const t = e.target.value;
+                                    patchQuad(pos, {
+                                      quad_type: t,
+                                      product_id: t === "product" ? q.product_id : null,
+                                      product_mode: t === "category" ? (q.product_mode || "auto") : null,
+                                    });
+                                  }}
+                                >
+                                  <option value="editorial">Photo (links to category)</option>
+                                  <option value="category">Category (auto / curated products)</option>
+                                  <option value="product">Product</option>
+                                </Select>
+                              </Field>
+
+                              <Field label="Title" hint="Optional">
+                                <TextInput value={q.title || ""} onChange={(e) => patchQuad(pos, { title: e.target.value })} />
+                              </Field>
+
+                              {qType === "product" ? (
+                                <Field label="Product">
+                                  <Select value={q.product_id || ""} onChange={(e) => patchQuad(pos, { product_id: e.target.value })}>
+                                    <option value="">Select a product</option>
+                                    {(products || []).map((p) => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.name}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                </Field>
+                              ) : (
+                                <Field label="Category">
+                                  <Select value={q.category_id || ""} onChange={(e) => patchQuad(pos, { category_id: e.target.value })}>
+                                    <option value="">Select a category</option>
+                                    {(categories || []).map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        {c.label}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                </Field>
+                              )}
+
+                              {qType !== "product" ? (
+                                <Field label="Image" hint="Optional for Category (auto collage). Required for Photo.">
+                                  <div className="grid gap-2">
+                                    <TextInput value={q.image_url || ""} onChange={(e) => patchQuad(pos, { image_url: e.target.value })} placeholder="Image URL" />
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      onChange={(e) => {
+                                        const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                                        e.target.value = "";
+                                        uploadHomeImage(`quad-${homeEdit.heroId}-${pos}`, f, "home/quads", (url) => patchQuad(pos, { image_url: url }));
+                                      }}
+                                      className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-sm"
+                                    />
+                                    {homeUploadBusy[`quad-${homeEdit.heroId}-${pos}`] ? <p className="text-xs text-[var(--color-text-muted)]">Uploading...</p> : null}
+                                  </div>
+                                </Field>
+                              ) : null}
+
+                              {qType === "category" ? (
+                                <>
+                                  <Field label="Products" hint="Auto uses newest products from this category. Manual is curated.">
+                                    <Select value={q.product_mode || "auto"} onChange={(e) => patchQuad(pos, { product_mode: e.target.value })}>
+                                      <option value="auto">Auto</option>
+                                      <option value="manual">Manual</option>
+                                    </Select>
+                                  </Field>
+
+                                  {String(q.product_mode || "auto") === "manual" ? (
+                                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                                      <p className="text-xs font-semibold text-[var(--color-text)]">Curated products</p>
+                                      <div className="mt-2 space-y-2">
+                                        {(q.manual_product_ids || []).map((pid, idx) => {
+                                          const p = (products || []).find((x) => String(x.id) === String(pid));
+                                          return (
+                                            <div key={pid} className="flex items-center justify-between gap-2">
+                                              <span className="text-sm text-[var(--color-text)] truncate">{p ? p.name : pid}</span>
+                                              <div className="flex items-center gap-1">
+                                                <button type="button" onClick={() => moveManualProduct(pos, idx, -1)} className="rounded-lg px-2 py-1 text-xs border border-[var(--color-border)]">↑</button>
+                                                <button type="button" onClick={() => moveManualProduct(pos, idx, 1)} className="rounded-lg px-2 py-1 text-xs border border-[var(--color-border)]">↓</button>
+                                                <button type="button" onClick={() => removeManualProductFromQuad(pos, pid)} className="rounded-lg px-2 py-1 text-xs border border-red-200 bg-red-50">Remove</button>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+
+                                        <div className="flex items-center gap-2">
+                                          <Select
+                                            value=""
+                                            onChange={(e) => {
+                                              const pid = e.target.value;
+                                              if (!pid) return;
+                                              addManualProductToQuad(pos, pid);
+                                              e.target.value = "";
+                                            }}
+                                          >
+                                            <option value="">Add product...</option>
+                                            {allowedProducts.map((p) => (
+                                              <option key={p.id} value={p.id}>
+                                                {p.name}
+                                              </option>
+                                            ))}
+                                          </Select>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </Modal>
+          </div>
+        )}
+
         {/* CATEGORIES */}
         {tab === "categories" && (
           <div className="mt-8 grid lg:grid-cols-2 gap-8">
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-              <h2 className="text-lg font-semibold text-[var(--color-text)]">Add category</h2>
+              <h2 className="text-lg font-semibold text-[var(--color-text)]">{catEditingSlug ? "Edit category" : "Add category"}</h2>
               <p className="mt-1 text-sm text-[var(--color-text-muted)]">
                 Slug is what appears in URLs (lowercase, no spaces).
               </p>
@@ -1222,16 +1819,58 @@ async function saveWebsiteNow() {
                   />
                 </Field>
 
+                <Field label="Type" hint="Normal is public. Secret requires a password.">
+                  <Select
+                    value={catDraft.category_type || "normal"}
+                    onChange={(e) => setCatDraft((d) => ({ ...d, category_type: e.target.value }))}
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="secret">Secret (password)</option>
+                  </Select>
+                </Field>
+
+                {String(catDraft.category_type || "normal") === "secret" ? (
+                  <Field label="Password" hint={catEditingSlug ? "Leave blank to keep current" : "Required"}>
+                    <TextInput
+                      type="password"
+                      value={catDraft.password}
+                      onChange={(e) => setCatDraft((d) => ({ ...d, password: e.target.value }))}
+                      placeholder={catEditingSlug ? "••••••" : "Set a password"}
+                    />
+                  </Field>
+                ) : null}
+
                 <button
                   type="button"
                   onClick={() => {
-                    upsertCategory(catDraft);
-                    setCatDraft({ label: "", slug: "" });
+                    const slug = String(catDraft.slug || "").trim().toLowerCase();
+                    const isNew = !(categories || []).some((c) => String(c.slug) === slug);
+                    if (String(catDraft.category_type || "normal") === "secret" && isNew && !String(catDraft.password || "").trim()) {
+                      window.alert("Secret categories require a password.");
+                      return;
+                    }
+
+                    upsertCategory({ ...catDraft, visible: true });
+                    setCatDraft({ label: "", slug: "", category_type: "normal", password: "" });
+                    setCatEditingSlug(null);
                   }}
                   className="rounded-xl px-4 py-3 text-sm font-semibold bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-95 transition"
                 >
-                  Save category
+                  {catEditingSlug ? "Update category" : "Save category"}
                 </button>
+
+                {catEditingSlug ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCatEditingSlug(null);
+                      setCatDraft({ label: "", slug: "", category_type: "normal", password: "" });
+                    }}
+                    className="w-full rounded-xl px-4 py-3 text-sm font-semibold border border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-surface-2)] transition"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -1250,30 +1889,58 @@ async function saveWebsiteNow() {
                   return (
                     <div key={c.slug} className="p-4 flex items-center justify-between gap-4">
                       <div>
-                        <p className="font-medium text-[var(--color-text)]">{c.label}</p>
+                        <p className="font-medium text-[var(--color-text)]">
+                          {c.label}
+                          {String(c.category_type || "normal") === "secret" ? (
+                            <span className="ml-2 text-xs text-[var(--color-text-muted)]">• 🔒 Secret</span>
+                          ) : null}
+                        </p>
                         <p className="text-sm text-[var(--color-text-muted)]">
                           {c.slug}
                           {used ? <span className="ml-2">• {count} product{count === 1 ? "" : "s"}</span> : null}
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const msg = used
-                            ? `Delete "${c.label}"?\n\n⚠️ This will also delete ${count} product${count === 1 ? "" : "s"} in this category.\n\nThis can’t be undone.`
-                            : `Delete "${c.label}"?\n\nThis can’t be undone.`;
-                          if (!window.confirm(msg)) return;
-                          deleteCategory(c.slug);
-                        }}
-                        className={`rounded-full px-3 py-1.5 text-sm border transition ${
-                          used
-                            ? "border-red-200 bg-red-50 hover:bg-red-100"
-                            : "border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-red-50 hover:border-red-200"
-                        }`}
-                      >
-                        Delete
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCatEditingSlug(c.slug);
+                            setCatDraft({
+                              label: c.label,
+                              slug: c.slug,
+                              category_type: c.category_type || "normal",
+                              password: "",
+                            });
+                            try {
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            } catch {
+                              window.scrollTo(0, 0);
+                            }
+                          }}
+                          className="rounded-full px-3 py-1.5 text-sm border border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-surface-2)] transition"
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const msg = used
+                              ? `Delete "${c.label}"?\n\n⚠️ This will also delete ${count} product${count === 1 ? "" : "s"} in this category.\n\nThis can’t be undone.`
+                              : `Delete "${c.label}"?\n\nThis can’t be undone.`;
+                            if (!window.confirm(msg)) return;
+                            deleteCategory(c.slug);
+                          }}
+                          className={`rounded-full px-3 py-1.5 text-sm border transition ${
+                            used
+                              ? "border-red-200 bg-red-50 hover:bg-red-100"
+                              : "border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-red-50 hover:border-red-200"
+                          }`}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

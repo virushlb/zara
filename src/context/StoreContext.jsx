@@ -63,6 +63,7 @@ function deriveCategories(products) {
     label: titleCase(slug),
     visible: true,
     sort_order: i,
+    category_type: "normal",
   }));
 }
 
@@ -71,6 +72,7 @@ function buildCloudStore() {
     settings: DEFAULT_SETTINGS,
     categories: [],
     products: [],
+    homeHeroes: [],
   };
 }
 
@@ -79,6 +81,7 @@ function buildDefaultStore() {
     settings: DEFAULT_SETTINGS,
     categories: deriveCategories(seedProducts),
     products: seedProducts,
+    homeHeroes: [],
   };
 }
 
@@ -96,7 +99,9 @@ function normalizeStore(maybe) {
   const categories = Array.isArray(s.categories) && s.categories.length ? s.categories : base.categories;
   const products = Array.isArray(s.products) && s.products.length ? s.products : base.products;
 
-  return { settings, categories, products };
+  const homeHeroes = Array.isArray(s.homeHeroes) ? s.homeHeroes : base.homeHeroes;
+
+  return { settings, categories, products, homeHeroes };
 }
 
 function loadLocalStore() {
@@ -200,7 +205,83 @@ function mapCategoryRow(row) {
     label: row.label,
     visible: row.visible !== false,
     sort_order: row.sort_order ?? 0,
+    category_type: row.category_type || "normal",
   };
+}
+
+function mapHomeHeroRows(heroRows, quadRows, quadProductRows) {
+  const byHero = new Map();
+  (heroRows || []).forEach((h) => {
+    byHero.set(String(h.id), {
+      id: h.id,
+      title: h.title || "",
+      subtitle: h.subtitle || "",
+      image_url: h.image_url || "",
+      position: Number(h.position ?? 0),
+      is_active: h.is_active !== false,
+      quads: [],
+    });
+  });
+
+  const manualByQuad = new Map();
+  (quadProductRows || []).forEach((r) => {
+    const qid = String(r.hero_quad_id);
+    const arr = manualByQuad.get(qid) || [];
+    arr.push({
+      product_id: r.product_id,
+      position: Number(r.position ?? 0),
+    });
+    manualByQuad.set(qid, arr);
+  });
+  manualByQuad.forEach((arr, qid) => {
+    arr.sort((a, b) => a.position - b.position);
+    manualByQuad.set(
+      qid,
+      arr.map((x) => x.product_id)
+    );
+  });
+
+  (quadRows || []).forEach((q) => {
+    const hid = String(q.hero_id);
+    const hero = byHero.get(hid);
+    if (!hero) return;
+    hero.quads.push({
+      id: q.id,
+      hero_id: q.hero_id,
+      position: Number(q.position ?? 1),
+      quad_type: q.quad_type || "editorial",
+      title: q.title || "",
+      image_url: q.image_url || "",
+      category_id: q.category_id || null,
+      product_id: q.product_id || null,
+      product_mode: q.product_mode || null,
+      manual_product_ids: manualByQuad.get(String(q.id)) || [],
+    });
+  });
+
+  // Ensure each hero has 4 quads (positions 1..4)
+  const out = Array.from(byHero.values())
+    .sort((a, b) => a.position - b.position)
+    .map((h) => {
+      const existing = new Map((h.quads || []).map((q) => [Number(q.position || 1), q]));
+      const quads = [1, 2, 3, 4].map((pos) =>
+        existing.get(pos) || {
+          id: null,
+          hero_id: h.id,
+          position: pos,
+          quad_type: "editorial",
+          title: "",
+          image_url: "",
+          category_id: null,
+          product_id: null,
+          product_mode: null,
+          manual_product_ids: [],
+        }
+      );
+      return { ...h, quads };
+    });
+
+  return out;
 }
 
 function mapProductRow(row) {
@@ -230,12 +311,39 @@ export function StoreProvider({ children }) {
   const refreshFromSupabase = useCallback(async () => {
     if (!supabaseEnabled) return;
 
+    const safe = async (p) => {
+      try {
+        const res = await p;
+        return res || {};
+      } catch (e) {
+        return { data: null, error: e };
+      }
+    };
+
     const [{ data: sRow }, { data: wRow }, { data: catRows }, { data: prodRows }] = await Promise.all([
-      supabase.from("site_settings").select("*").eq("id", 1).maybeSingle(),
-      supabase.from("website_settings").select("*").limit(1).maybeSingle(),
-      supabase.from("categories").select("id,slug,label,visible,sort_order").order("sort_order", { ascending: true }),
-      supabase.from("products").select("*").order("created_at", { ascending: false }),
+      safe(supabase.from("site_settings").select("*").eq("id", 1).maybeSingle()),
+      safe(supabase.from("website_settings").select("*").limit(1).maybeSingle()),
+      safe(
+        supabase
+          .from("categories")
+          .select("id,slug,label,visible,sort_order,category_type")
+          .order("sort_order", { ascending: true })
+      ),
+      safe(supabase.from("products").select("*").order("created_at", { ascending: false })),
     ]);
+
+    // Optional homepage tables (won't exist on older DBs)
+    const [{ data: heroRows, error: heroErr }, { data: quadRows, error: quadErr }, { data: quadProductRows, error: qpErr }] =
+      await Promise.all([
+        safe(supabase.from("heroes").select("*").order("position", { ascending: true })),
+        safe(supabase.from("hero_quads").select("*").order("position", { ascending: true })),
+        safe(supabase.from("hero_quad_products").select("*").order("position", { ascending: true })),
+      ]);
+
+    const homeHeroes =
+      heroErr || quadErr || qpErr
+        ? []
+        : mapHomeHeroRows(Array.isArray(heroRows) ? heroRows : [], Array.isArray(quadRows) ? quadRows : [], Array.isArray(quadProductRows) ? quadProductRows : []);
 
     if (wRow?.id !== undefined && wRow?.id !== null) websiteSettingsIdRef.current = wRow.id;
 
@@ -243,6 +351,7 @@ export function StoreProvider({ children }) {
       settings: mapSettingsRow(sRow, wRow),
       categories: Array.isArray(catRows) ? catRows.map(mapCategoryRow) : [],
       products: Array.isArray(prodRows) ? prodRows.map(mapProductRow) : [],
+      homeHeroes,
     });
   }, []);
 
@@ -386,14 +495,33 @@ export function StoreProvider({ children }) {
       const next = { ...(cat || {}) };
       next.slug = String(next.slug || "").trim().toLowerCase();
       next.label = String(next.label || "").trim();
+      next.category_type = next.category_type === "secret" ? "secret" : "normal";
+      const existing = (store.categories || []).find((c) => String(c.slug) === next.slug) || null;
+      const isNew = !existing;
+      const pw = String(next.password || "").trim();
+      // For secret categories:
+      // - New secret category must have a password
+      // - Existing secret category keeps its password unless you provide a new one
+      const shouldSetPassword = next.category_type === "secret" && (isNew ? Boolean(pw) : Boolean(pw));
+      if (next.category_type === "secret" && isNew && !pw) return;
       if (!next.slug || !next.label) return;
 
       if (!supabaseEnabled) {
         setStore((prev) => {
           const exists = prev.categories.some((c) => c.slug === next.slug);
           const categories = exists
-            ? prev.categories.map((c) => (c.slug === next.slug ? { ...c, ...next, id: next.slug } : c))
-            : [...prev.categories, { id: next.slug, visible: true, ...next }];
+            ? prev.categories.map((c) => {
+                if (c.slug !== next.slug) return c;
+                const patch = { ...next };
+                if (next.category_type === "secret") {
+                  if (pw) patch.password = pw;
+                  else delete patch.password;
+                } else {
+                  patch.password = null;
+                }
+                return { ...c, ...patch, id: next.slug };
+              })
+            : [...prev.categories, { id: next.slug, visible: true, ...next, ...(next.category_type === "secret" ? { password: pw } : { password: null }) }];
           return { ...prev, categories };
         });
         return;
@@ -401,17 +529,23 @@ export function StoreProvider({ children }) {
 
       (async () => {
         try {
-          await supabase
-            .from("categories")
-            .upsert(
-              {
-                slug: next.slug,
-                label: next.label,
-                visible: next.visible !== false,
-                sort_order: Number(next.sort_order ?? 0),
-              },
-              { onConflict: "slug" }
-            );
+          const payload = {
+            slug: next.slug,
+            label: next.label,
+            visible: next.visible !== false,
+            sort_order: Number(next.sort_order ?? 0),
+            category_type: next.category_type,
+          };
+
+          // Only set password when needed (avoid accidentally wiping it)
+          if (next.category_type === "secret") {
+            if (pw) payload.password = pw;
+            // else: omit
+          } else {
+            payload.password = null;
+          }
+
+          await supabase.from("categories").upsert(payload, { onConflict: "slug" });
           await refreshFromSupabase();
         } catch (e) {
           console.error("upsertCategory failed", e);
@@ -559,6 +693,206 @@ export function StoreProvider({ children }) {
       setStore(buildDefaultStore());
     }
 
+    // Home heroes (fashion homepage blocks)
+    async function createHomeHero({ title, subtitle, image_url }) {
+      if (!supabaseEnabled) {
+        setStore((prev) => {
+          const next = { ...prev };
+          const newHero = {
+            id: `local-hero-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            title: title || "",
+            subtitle: subtitle || "",
+            image_url: image_url || "",
+            position: (prev.homeHeroes?.length || 0) + 1,
+            is_active: true,
+            quads: [1, 2, 3, 4].map((pos) => ({
+              id: `local-quad-${pos}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+              hero_id: null,
+              position: pos,
+              quad_type: "editorial",
+              title: "",
+              image_url: "",
+              category_id: null,
+              product_id: null,
+              product_mode: null,
+              manual_product_ids: [],
+            })),
+          };
+          next.homeHeroes = [...(prev.homeHeroes || []), newHero];
+          return next;
+        });
+        return { ok: true };
+      }
+
+      try {
+        const { data: created, error } = await supabase
+          .from("heroes")
+          .insert({
+            title: String(title || ""),
+            subtitle: String(subtitle || ""),
+            image_url: String(image_url || ""),
+            position: (store.homeHeroes?.length || 0) + 1,
+            is_active: true,
+          })
+          .select("*")
+          .maybeSingle();
+        if (error) throw error;
+        if (created?.id) {
+          const quads = [1, 2, 3, 4].map((pos) => ({
+            hero_id: created.id,
+            position: pos,
+            quad_type: "editorial",
+            title: "",
+            image_url: "",
+            category_id: null,
+            product_id: null,
+            product_mode: null,
+          }));
+          await supabase.from("hero_quads").insert(quads);
+        }
+        await refreshFromSupabase();
+        return { ok: true };
+      } catch (e) {
+        console.error("createHomeHero failed", e);
+        return { ok: false, error: e?.message || "Failed to create hero" };
+      }
+    }
+
+    async function updateHomeHero(id, patch) {
+      const idStr = String(id || "");
+      if (!idStr) return { ok: false, error: "Missing hero id" };
+
+      if (!supabaseEnabled) {
+        setStore((prev) => {
+          const homeHeroes = (prev.homeHeroes || []).map((h) =>
+            String(h.id) === idStr ? { ...h, ...(patch || {}) } : h
+          );
+          return { ...prev, homeHeroes };
+        });
+        return { ok: true };
+      }
+
+      try {
+        const payload = { ...(patch || {}) };
+        if (payload.position !== undefined) payload.position = Number(payload.position || 0);
+        if (payload.is_active !== undefined) payload.is_active = Boolean(payload.is_active);
+        const { error } = await supabase.from("heroes").update(payload).eq("id", idStr);
+        if (error) throw error;
+        await refreshFromSupabase();
+        return { ok: true };
+      } catch (e) {
+        console.error("updateHomeHero failed", e);
+        return { ok: false, error: e?.message || "Failed to update hero" };
+      }
+    }
+
+    async function deleteHomeHero(id) {
+      const idStr = String(id || "");
+      if (!idStr) return { ok: false, error: "Missing hero id" };
+
+      if (!supabaseEnabled) {
+        setStore((prev) => ({
+          ...prev,
+          homeHeroes: (prev.homeHeroes || []).filter((h) => String(h.id) !== idStr),
+        }));
+        return { ok: true };
+      }
+
+      try {
+        const { error } = await supabase.from("heroes").delete().eq("id", idStr);
+        if (error) throw error;
+        await refreshFromSupabase();
+        return { ok: true };
+      } catch (e) {
+        console.error("deleteHomeHero failed", e);
+        return { ok: false, error: e?.message || "Failed to delete hero" };
+      }
+    }
+
+    async function saveHeroQuad(quad) {
+      if (!quad) return { ok: false, error: "Missing quad" };
+      const idStr = quad.id ? String(quad.id) : "";
+
+      if (!supabaseEnabled) {
+        setStore((prev) => {
+          const homeHeroes = (prev.homeHeroes || []).map((h) => {
+            if (String(h.id) !== String(quad.hero_id)) return h;
+            const quads = (h.quads || []).map((q) =>
+              Number(q.position) === Number(quad.position) ? { ...q, ...quad } : q
+            );
+            return { ...h, quads };
+          });
+          return { ...prev, homeHeroes };
+        });
+        return { ok: true, id: idStr || null };
+      }
+
+      try {
+        let savedId = idStr || null;
+        const payload = {
+          hero_id: quad.hero_id,
+          position: Number(quad.position || 1),
+          quad_type: quad.quad_type || "editorial",
+          title: quad.title || "",
+          image_url: quad.image_url || "",
+          category_id: quad.category_id || null,
+          product_id: quad.product_id || null,
+          product_mode: quad.product_mode || null,
+        };
+
+        if (idStr) {
+          const { error } = await supabase.from("hero_quads").update(payload).eq("id", idStr);
+          if (error) throw error;
+        } else {
+          const { data: created, error } = await supabase
+            .from("hero_quads")
+            .insert(payload)
+            .select("*")
+            .maybeSingle();
+          if (error) throw error;
+          savedId = created?.id || null;
+        }
+        await refreshFromSupabase();
+        return { ok: true, id: savedId };
+      } catch (e) {
+        console.error("saveHeroQuad failed", e);
+        return { ok: false, error: e?.message || "Failed to save quad" };
+      }
+    }
+
+    async function setHeroQuadManualProducts(heroQuadId, productIds) {
+      const qid = String(heroQuadId || "");
+      if (!qid) return { ok: false, error: "Missing quad id" };
+      const ids = Array.isArray(productIds) ? productIds.map((x) => String(x)).filter(Boolean) : [];
+
+      if (!supabaseEnabled) {
+        setStore((prev) => {
+          const homeHeroes = (prev.homeHeroes || []).map((h) => {
+            const quads = (h.quads || []).map((q) =>
+              String(q.id) === qid ? { ...q, manual_product_ids: ids } : q
+            );
+            return { ...h, quads };
+          });
+          return { ...prev, homeHeroes };
+        });
+        return { ok: true };
+      }
+
+      try {
+        { const { error } = await supabase.from("hero_quad_products").delete().eq("hero_quad_id", qid); if (error) throw error; }
+        if (ids.length) {
+          const rows = ids.map((pid, i) => ({ hero_quad_id: qid, product_id: pid, position: i + 1 }));
+          const { error } = await supabase.from("hero_quad_products").insert(rows);
+          if (error) throw error;
+        }
+        await refreshFromSupabase();
+        return { ok: true };
+      } catch (e) {
+        console.error("setHeroQuadManualProducts failed", e);
+        return { ok: false, error: e?.message || "Failed to save products" };
+      }
+    }
+
     return {
       store,
       isReady,
@@ -567,6 +901,7 @@ export function StoreProvider({ children }) {
       hero: settings.hero,
       categories: store.categories,
       products: store.products,
+      homeHeroes: store.homeHeroes,
       setSettings,
       setBanner,
       setHero,
@@ -576,6 +911,11 @@ export function StoreProvider({ children }) {
       upsertProduct,
       deleteProduct,
       resetStore,
+      createHomeHero,
+      updateHomeHero,
+      deleteHomeHero,
+      saveHeroQuad,
+      setHeroQuadManualProducts,
       // Helpful flag for UI
       supabaseEnabled,
       isReady,

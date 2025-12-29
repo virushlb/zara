@@ -10,6 +10,10 @@
 
 @layer base {
   :root {
+    /* Typography */
+    --font-body: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    --font-display: "Playfair Display", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+
     /* Surfaces */
     --color-bg: #ffffff;
     --color-surface: #f6f6f6;
@@ -55,6 +59,10 @@
   body {
     background-color: var(--color-bg);
     color: var(--color-text);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
   }
 }
 a {
@@ -309,6 +317,55 @@ a {
 
 /* Extra micro-interactions (subtle, "premium" feel) */
 @layer utilities {
+  /* Fashion / luxury typography helpers */
+  .lux-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  .lux-kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  /* Scroll reveal (intersection-observer toggles the --in class) */
+  .lux-reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity 780ms cubic-bezier(0.16, 1, 0.3, 1), transform 780ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+  .lux-reveal.lux-reveal--in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Subtle editorial film grain (very light) */
+  .lux-grain {
+    position: relative;
+  }
+  .lux-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1px);
+    background-size: 22px 22px;
+    opacity: 0.08;
+    mix-blend-mode: multiply;
+  }
+
+  @keyframes lux-kenburns {
+    from { transform: scale(1.03); }
+    to { transform: scale(1.00); }
+  }
+  .lux-kenburns {
+    animation: lux-kenburns 10s ease-out both;
+    will-change: transform;
+  }
+
   .baggo-card {
   /* Premium motion, no drop-shadows */
   transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), filter 260ms ease, opacity 260ms ease;
@@ -345,9 +402,46 @@ a {
   .baggo-page-enter,
   .baggo-banner-enter,
   .baggo-reveal,
+  .lux-reveal,
+  .lux-kenburns,
   .baggo-fade,
   .baggo-fade-in {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+
+/* Luxury editorial helpers */
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-body { font-family: var(--font-body); }
+
+  .lux-hairline { border-color: rgba(17, 24, 39, 0.10) !important; }
+
+  @keyframes lux-fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes lux-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .lux-reveal {
+    animation: lux-fade-up 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    will-change: transform, opacity;
+  }
+
+  .lux-reveal-fade {
+    animation: lux-fade 700ms ease-out both;
+    will-change: opacity;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lux-reveal, .lux-reveal-fade {
+    animation: none !important;
   }
 }

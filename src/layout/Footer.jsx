@@ -18,12 +18,11 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-6 md:px-10 py-12">
         <div className="grid gap-10 md:grid-cols-3">
           <div>
-            <div className="text-lg font-semibold tracking-wide text-[var(--color-text)]">
+            <div className="font-display text-lg tracking-tight text-[var(--color-text)]">
               {name}
             </div>
             <p className="mt-3 text-sm leading-6 text-[var(--color-text-muted)] max-w-sm">
-              A clean, minimal storefront — built to scale from a simple shop to a
-              full admin-managed platform.
+              A refined online home for collections, lookbooks, and limited drops.
             </p>
           </div>
 
@@ -48,8 +47,7 @@ export default function Footer() {
           <div>
             <div className="text-sm font-semibold text-[var(--color-text)]">Info</div>
             <p className="mt-4 text-sm leading-6 text-[var(--color-text-muted)]">
-              Want the advanced admin (themes, fonts, section control, and more)?
-              That will be available as a Pro upgrade after the core website is complete.
+              For custom orders, styling, wholesale, or collaborations — get in touch anytime.
             </p>
           </div>
         </div>
@@ -58,7 +56,7 @@ export default function Footer() {
           <p className="text-xs text-[var(--color-text-muted)]">
             © {year} {name}. All rights reserved.
           </p>
-          <p className="text-xs text-[var(--color-text-muted)]">Built with a theme system (Pro-ready).</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Designed for a premium shopping experience.</p>
         </div>
       </div>
     </footer>

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useStore } from "../context/StoreContext";
 import { useCart } from "../context/CartContext";
 import Container from "../layout/Container";
 import ProductCard from "../components/ProductCard";
+import Modal from "../components/Modal";
+import { isCategoryUnlocked, unlockCategoryWithPassword } from "../lib/secretAccess";
 import { getMaxStockFor, isPerImageStock, hasAnyStock } from "../lib/stock";
 import { getImageIndex, getImageMeta } from "../lib/imageMeta";
 import SafeImage from "../components/SafeImage";
@@ -29,9 +31,32 @@ function Pill({ active, children, onClick, disabled }) {
 export default function Product() {
   const { id } = useParams();
   const { addToCart } = useCart();
-  const { products } = useStore();
+  const { products, categories } = useStore();
+  const navigate = useNavigate();
 
   const product = products.find((item) => String(item.id) === String(id));
+
+  // Secret category lock (prevents direct URL access)
+  const categoryMeta = useMemo(() => {
+    if (!product) return null;
+    return (categories || []).find((c) => String(c.slug) === String(product.category)) || null;
+  }, [categories, product]);
+
+  const isLocked = Boolean(
+    product &&
+      categoryMeta &&
+      String(categoryMeta.category_type || "normal") === "secret" &&
+      !isCategoryUnlocked(product.category)
+  );
+
+  const [secretOpen, setSecretOpen] = useState(false);
+  const [secretPassword, setSecretPassword] = useState("");
+  const [secretError, setSecretError] = useState("");
+  const [secretBusy, setSecretBusy] = useState(false);
+
+  useEffect(() => {
+    if (isLocked) setSecretOpen(true);
+  }, [isLocked]);
 
   const sizes = useMemo(() => product?.sizes || [], [product]);
   const images = useMemo(
@@ -151,10 +176,105 @@ export default function Product() {
       .slice(0, 8);
   }, [product, products]);
 
+  async function handleUnlockSecret() {
+    if (!product?.category) return;
+    setSecretBusy(true);
+    setSecretError("");
+    try {
+      const ok = await unlockCategoryWithPassword({ slug: product.category, password: secretPassword });
+      if (!ok) {
+        setSecretError("Wrong password. Try again.");
+        return;
+      }
+      setSecretOpen(false);
+      setSecretPassword("");
+    } catch (e) {
+      setSecretError("Couldn't unlock this collection. Please try again.");
+    } finally {
+      setSecretBusy(false);
+    }
+  }
+
+  function handleCancelSecret() {
+    setSecretOpen(false);
+    setSecretPassword("");
+    setSecretError("");
+    setSecretBusy(false);
+    // Prevent looping on a locked product page.
+    navigate("/shop");
+  }
+
   if (!product) {
     return (
       <Container>
         <p className="text-[var(--color-text-muted)]">Product not found.</p>
+      </Container>
+    );
+  }
+
+  if (isLocked) {
+    return (
+      <Container>
+        <div className="pt-10 pb-16">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+            <h1 className="text-xl font-semibold text-[var(--color-text)]">Private collection</h1>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              Enter the password to view this product.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setSecretOpen(true)}
+                className="rounded-full px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)]"
+              >
+                Unlock
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelSecret}
+                className="rounded-full px-4 py-2 text-sm border border-[var(--color-border)] bg-[var(--color-bg)]"
+              >
+                Back to shop
+              </button>
+            </div>
+          </div>
+
+          <Modal
+            open={secretOpen}
+            title={`Private collection${categoryMeta?.label ? `: ${categoryMeta.label}` : ""}`}
+            onClose={handleCancelSecret}
+            widthClass="max-w-md"
+            footer={
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleCancelSecret}
+                  className="rounded-lg px-4 py-2 text-sm border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUnlockSecret}
+                  disabled={secretBusy || !secretPassword.trim()}
+                  className="rounded-lg px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-50"
+                >
+                  {secretBusy ? "Unlocking..." : "Unlock"}
+                </button>
+              </div>
+            }
+          >
+            <p className="text-sm text-[var(--color-text-muted)]">Enter the password to view this category.</p>
+            <input
+              type="password"
+              value={secretPassword}
+              onChange={(e) => setSecretPassword(e.target.value)}
+              placeholder="Password"
+              className="mt-3 w-full border border-[var(--color-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+            />
+            {secretError ? <p className="mt-3 text-sm text-red-600">{secretError}</p> : null}
+          </Modal>
+        </div>
       </Container>
     );
   }

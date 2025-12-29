@@ -90,8 +90,8 @@ export default function Navbar() {
           {/* Logo */}
           <NavLink
             to="/"
-            className={`text-[var(--color-nav-text)] font-semibold tracking-wide transition-all hover:scale-[1.02] active:scale-[0.98] ${
-              scrolled ? "text-lg" : "text-xl"
+            className={`text-[var(--color-nav-text)] font-display uppercase tracking-[0.22em] transition-all hover:opacity-90 active:opacity-80 ${
+              scrolled ? "text-base" : "text-lg"
             }`}
             onClick={() => setOpen(false)}
           >

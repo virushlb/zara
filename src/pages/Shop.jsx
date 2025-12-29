@@ -1,19 +1,24 @@
 import ProductCard from "../components/ProductCard";
+import Modal from "../components/Modal";
 import Container from "../layout/Container";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useStore } from "../context/StoreContext";
 import { getUnitPrice } from "../lib/pricing";
+import { isCategoryUnlocked, unlockCategoryWithPassword } from "../lib/secretAccess";
 
 export default function Shop() {
   const { products, categories: storeCategories } = useStore();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const categories = useMemo(() => {
     const visible = (storeCategories || []).filter((c) => c.visible !== false);
     return [
       { label: "All", value: "all" },
-      ...visible.map((c) => ({ label: c.label || c.slug, value: c.slug })),
+      ...visible.map((c) => ({
+        label: `${c.label || c.slug}${c.category_type === "secret" ? " 🔒" : ""}`,
+        value: c.slug,
+      })),
     ];
   }, [storeCategories]);
 
@@ -31,6 +36,12 @@ export default function Shop() {
   const [sort, setSort] = useState("default");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  // Secret categories
+  const [secretModal, setSecretModal] = useState({ open: false, slug: "", label: "" });
+  const [secretPassword, setSecretPassword] = useState("");
+  const [secretError, setSecretError] = useState("");
+  const [secretBusy, setSecretBusy] = useState(false);
 
   useEffect(() => {
     setMaxPrice((prev) => Math.max(prev, maxRange));
@@ -51,12 +62,30 @@ export default function Shop() {
     if (ok) setCategory(c);
   }, [searchParams, categories]);
 
+  const selectedCategoryMeta = useMemo(() => {
+    return (storeCategories || []).find((c) => c.slug === category) || null;
+  }, [storeCategories, category]);
+
+  const isLocked =
+    category !== "all" &&
+    selectedCategoryMeta?.category_type === "secret" &&
+    !isCategoryUnlocked(category);
+
+  // If user lands on a secret category (or selects one), ask for the password.
+  useEffect(() => {
+    if (!isLocked) return;
+    setSecretModal({ open: true, slug: category, label: selectedCategoryMeta?.label || category });
+    setSecretError("");
+    setSecretPassword("");
+  }, [isLocked, category, selectedCategoryMeta]);
+
   // Reset pagination when filters change
   useEffect(() => {
     setPage(1);
   }, [category, maxPrice, sort, search]);
 
   const filteredProducts = useMemo(() => {
+    if (isLocked) return [];
     let result = [...products].filter((p) => {
       const matchesCategory = category === "all" || p.category === category;
       const matchesPrice = Number(getUnitPrice(p) || 0) <= maxPrice;
@@ -70,7 +99,7 @@ export default function Shop() {
     if (sort === "high") result.sort((a, b) => getUnitPrice(b) - getUnitPrice(a));
 
     return result;
-  }, [category, maxPrice, sort, search, products]);
+  }, [category, maxPrice, sort, search, products, isLocked]);
 
   const total = filteredProducts.length;
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
@@ -105,6 +134,37 @@ export default function Shop() {
     }
     return out;
   }, [totalPages, safePage]);
+
+  async function handleUnlockSecret() {
+    if (!secretModal.slug) return;
+    setSecretBusy(true);
+    setSecretError("");
+    try {
+      const ok = await unlockCategoryWithPassword({ slug: secretModal.slug, password: secretPassword });
+      if (!ok) {
+        setSecretError("Wrong password. Try again.");
+        return;
+      }
+      setSecretModal({ open: false, slug: "", label: "" });
+      setSecretPassword("");
+    } catch (e) {
+      setSecretError("Couldn't unlock this collection. Please try again.");
+    } finally {
+      setSecretBusy(false);
+    }
+  }
+
+  function handleCancelSecret() {
+    setSecretModal({ open: false, slug: "", label: "" });
+    setSecretPassword("");
+    setSecretError("");
+    setSecretBusy(false);
+    // If the user landed via /shop?category=..., remove it so the modal doesn't pop back.
+    const next = new URLSearchParams(searchParams);
+    next.delete("category");
+    setSearchParams(next);
+    setCategory("all");
+  }
 
   return (
     <Container>
@@ -219,6 +279,12 @@ export default function Shop() {
           </div>
         </div>
 
+        {isLocked ? (
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-text)]">
+            This collection is private. Enter the password to view it.
+          </div>
+        ) : null}
+
         <p className="text-sm text-[var(--color-text-muted)]">
           {total === 0
             ? "Showing 0 results"
@@ -279,6 +345,46 @@ export default function Shop() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={secretModal.open}
+        title={`Private collection${secretModal.label ? `: ${secretModal.label}` : ""}`}
+        onClose={handleCancelSecret}
+        widthClass="max-w-md"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={handleCancelSecret}
+              className="rounded-lg px-4 py-2 text-sm border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleUnlockSecret}
+              disabled={secretBusy || !secretPassword.trim()}
+              className="rounded-lg px-4 py-2 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)] disabled:opacity-50"
+            >
+              {secretBusy ? "Unlocking..." : "Unlock"}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Enter the password to view this category.
+        </p>
+
+        <input
+          type="password"
+          value={secretPassword}
+          onChange={(e) => setSecretPassword(e.target.value)}
+          placeholder="Password"
+          className="mt-3 w-full border border-[var(--color-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+        />
+
+        {secretError ? <p className="mt-3 text-sm text-red-600">{secretError}</p> : null}
+      </Modal>
     </Container>
   );
 }
