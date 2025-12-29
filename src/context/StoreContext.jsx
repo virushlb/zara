@@ -298,11 +298,12 @@ export function StoreProvider({ children }) {
 
         // If website_settings is empty or doesn't use id=1, try a plain insert once.
         if (wsError && (wsId === undefined || wsId === null)) {
-          const { data: created, error: createErr } = await supabase
-            .from("website_settings")
-            .insert(websiteSettingsToRow(nextSettings, null))
-            .select("*")
-            .maybeSingle();
+            const { data: created, error: createErr } = await supabase
+              .from("website_settings")
+              .insert(websiteSettingsToRow(nextSettings, null))
+              .select("*")
+              .maybeSingle();
+
           if (!createErr && created?.id !== undefined && created?.id !== null) {
             websiteSettingsIdRef.current = created.id;
           }
@@ -331,7 +332,7 @@ export function StoreProvider({ children }) {
           }
           if (wsError && (wsId === undefined || wsId === null)) {
             const { data: created, error: createErr } = await supabase
-              .from("website_settings")
+              .from("site_settings")
               .insert(websiteSettingsToRow(store.settings, null))
               .select("*")
               .maybeSingle();
