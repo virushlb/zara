@@ -53,7 +53,23 @@ export async function verifyCategoryPassword({ slug, password }) {
   const s = String(slug || "").trim().toLowerCase();
   const pw = String(password || "");
   if (!s || !pw) return false;
-  if (!supabaseEnabled) return false;
+
+  // Demo mode fallback (no Supabase): verify against the locally stored categories.
+  // This keeps secret collections usable in localStorage-only deployments.
+  if (!supabaseEnabled) {
+    if (typeof window === "undefined") return false;
+    try {
+      const raw = window.localStorage.getItem("BAGGO_STORE_V1");
+      const store = raw ? JSON.parse(raw) : null;
+      const cats = Array.isArray(store?.categories) ? store.categories : [];
+      const row = cats.find((c) => String(c?.slug || "").trim().toLowerCase() === s);
+      if (!row) return false;
+      if (String(row.category_type || "normal") !== "secret") return false;
+      return String(row.password || "") === pw;
+    } catch {
+      return false;
+    }
+  }
 
   // Preferred: RPC (keeps the password column out of normal reads)
   try {

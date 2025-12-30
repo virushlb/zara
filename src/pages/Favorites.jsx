@@ -3,15 +3,28 @@ import { useFavorites } from "../context/FavoritesContext";
 import { useStore } from "../context/StoreContext";
 import ProductCard from "../components/ProductCard";
 import Container from "../layout/Container";
+import { isCategoryUnlocked } from "../lib/secretAccess";
 
 export default function Favorites() {
   const { favoriteIds } = useFavorites();
-  const { products } = useStore();
+  const { products, categories } = useStore();
 
   const favorites = useMemo(() => {
     const set = new Set(favoriteIds.map(String));
-    return products.filter((p) => set.has(String(p.id)));
-  }, [favoriteIds, products]);
+    const secretSlugs = new Set(
+      (categories || [])
+        .filter((c) => String(c.category_type || "normal") === "secret")
+        .map((c) => String(c.slug || "").toLowerCase())
+        .filter(Boolean)
+    );
+
+    return (products || []).filter((p) => {
+      if (!set.has(String(p.id))) return false;
+      const cat = String(p.category || "").toLowerCase();
+      if (!secretSlugs.has(cat)) return true;
+      return isCategoryUnlocked(cat);
+    });
+  }, [favoriteIds, products, categories]);
 
   if (favorites.length === 0) {
     return (
