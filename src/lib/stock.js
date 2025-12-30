@@ -15,6 +15,19 @@ function toInt(v) {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
 
+function getPerImageValue(stock, variantIndex, size) {
+  const variants = Array.isArray(stock?.variants) ? stock.variants : [];
+  const base = variants[0] || {};
+  const cur = variants[Number(variantIndex ?? 0)] || {};
+
+  const curVal = cur?.stock?.[size];
+  // If the variant doesn't have a value, fall back to the first image's stock.
+  if (curVal === undefined || curVal === null || curVal === "") {
+    return base?.stock?.[size];
+  }
+  return curVal;
+}
+
 export function isPerImageStock(stock) {
   return Boolean(stock && typeof stock === "object" && stock.__mode === "per_image" && Array.isArray(stock.variants));
 }
@@ -23,8 +36,13 @@ export function getVariantStockMap(product, variantIndex) {
   const stock = product?.stock;
   if (!isPerImageStock(stock)) return stock && typeof stock === "object" ? stock : {};
   const idx = Number(variantIndex ?? 0);
-  const v = stock.variants?.[idx];
-  return v && typeof v === "object" && v.stock && typeof v.stock === "object" ? v.stock : {};
+  const variants = Array.isArray(stock.variants) ? stock.variants : [];
+  const base = variants[0] || {};
+  const cur = variants[idx] || {};
+  const baseMap = base && typeof base.stock === "object" ? base.stock : {};
+  const curMap = cur && typeof cur.stock === "object" ? cur.stock : {};
+  // Merge base + current (current overrides base).
+  return { ...baseMap, ...curMap };
 }
 
 export function getMaxStockFor(product, size, variantIndex) {
@@ -38,8 +56,7 @@ export function getMaxStockFor(product, size, variantIndex) {
   }
 
   const idx = Number(variantIndex ?? 0);
-  const v = stock.variants?.[idx];
-  return toInt(v?.stock?.[s]);
+  return toInt(getPerImageValue(stock, idx, s));
 }
 
 export function getTotalStockForSize(product, size) {
@@ -51,7 +68,7 @@ export function getTotalStockForSize(product, size) {
   if (!isPerImageStock(stock)) return toInt(stock?.[s]);
 
   return toInt(
-    (stock.variants || []).reduce((sum, v) => sum + toInt(v?.stock?.[s]), 0)
+    (stock.variants || []).reduce((sum, _v, vi) => sum + toInt(getPerImageValue(stock, vi, s)), 0)
   );
 }
 
@@ -80,7 +97,7 @@ export function pickFirstInStock(product) {
     const variants = Array.isArray(stock.variants) ? stock.variants : [];
     for (const s of sizes) {
       for (let vi = 0; vi < variants.length; vi++) {
-        if (toInt(variants[vi]?.stock?.[s]) > 0) {
+        if (toInt(getPerImageValue(stock, vi, s)) > 0) {
           return {
             size: s,
             variantIndex: vi,
@@ -137,7 +154,7 @@ export function listStockEntries(product) {
       for (const s of sizes) {
         rows.push({
           size: s,
-          qty: toInt(v?.stock?.[s]),
+          qty: toInt(getPerImageValue(stock, vi, s)),
           variantIndex: vi,
           variantName,
           image: images[vi] || images[0] || product.image || "",

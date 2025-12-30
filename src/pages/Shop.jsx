@@ -16,18 +16,32 @@ export default function Shop() {
     return [
       { label: "All", value: "all" },
       ...visible.map((c) => ({
-        label: `${c.label || c.slug}${c.category_type === "secret" ? " 🔒" : ""}`,
+        label: `${c.label || c.slug}${String(c.category_type || "normal") === "secret" ? " 🔒" : ""}`,
         value: c.slug,
       })),
     ];
   }, [storeCategories]);
+
+  const secretCategorySlugs = useMemo(() => {
+    return new Set(
+      (storeCategories || [])
+        .filter((c) => c.visible !== false && String(c.category_type || "normal") === "secret")
+        .map((c) => String(c.slug || "").toLowerCase())
+        .filter(Boolean)
+    );
+  }, [storeCategories]);
+
+  const priceBaseProducts = useMemo(() => {
+    const base = (products || []).filter((p) => !secretCategorySlugs.has(String(p.category || "").toLowerCase()));
+    return base.length ? base : products || [];
+  }, [products, secretCategorySlugs]);
 
   const useCategoryDropdown = useMemo(() => {
     // Excluding "All" — if there are more than 5 real categories, switch to dropdown for a cleaner UI.
     return Math.max(0, (categories?.length || 0) - 1) > 5;
   }, [categories]);
 
-  const prices = products.map((p) => Number(getUnitPrice(p) || 0));
+  const prices = (priceBaseProducts || []).map((p) => Number(getUnitPrice(p) || 0));
   const minRange = Math.min(50, ...prices);
   const maxRange = Math.max(200, ...prices);
 
@@ -63,12 +77,13 @@ export default function Shop() {
   }, [searchParams, categories]);
 
   const selectedCategoryMeta = useMemo(() => {
-    return (storeCategories || []).find((c) => c.slug === category) || null;
+    const key = String(category || "").toLowerCase();
+    return (storeCategories || []).find((c) => String(c.slug || "").toLowerCase() === key) || null;
   }, [storeCategories, category]);
 
   const isLocked =
     category !== "all" &&
-    selectedCategoryMeta?.category_type === "secret" &&
+    String(selectedCategoryMeta?.category_type || "normal") === "secret" &&
     !isCategoryUnlocked(category);
 
   // If user lands on a secret category (or selects one), ask for the password.
@@ -87,7 +102,11 @@ export default function Shop() {
   const filteredProducts = useMemo(() => {
     if (isLocked) return [];
     let result = [...products].filter((p) => {
-      const matchesCategory = category === "all" || p.category === category;
+      const pCat = String(p.category || "").toLowerCase();
+      const matchesCategory =
+        category === "all"
+          ? !secretCategorySlugs.has(pCat)
+          : pCat === String(category || "").toLowerCase();
       const matchesPrice = Number(getUnitPrice(p) || 0) <= maxPrice;
       const matchesSearch = String(p.name || "")
         .toLowerCase()
@@ -99,7 +118,7 @@ export default function Shop() {
     if (sort === "high") result.sort((a, b) => getUnitPrice(b) - getUnitPrice(a));
 
     return result;
-  }, [category, maxPrice, sort, search, products, isLocked]);
+  }, [category, maxPrice, sort, search, products, isLocked, secretCategorySlugs]);
 
   const total = filteredProducts.length;
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);

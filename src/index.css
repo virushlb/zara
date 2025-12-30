@@ -358,7 +358,7 @@ a {
   }
 
   @keyframes lux-kenburns {
-    from { transform: scale(1.03); }
+    from { transform: scale(1.015); }
     to { transform: scale(1.00); }
   }
   .lux-kenburns {

@@ -4,6 +4,7 @@ import ProductCard from "../components/ProductCard";
 import SafeImage from "../components/SafeImage";
 import { useStore } from "../context/StoreContext";
 import { getUnitPrice } from "../lib/pricing";
+import { isCategoryUnlocked } from "../lib/secretAccess";
 
 function SectionTitle({ title, actionLabel, actionHref }) {
   return (
@@ -26,23 +27,14 @@ function SectionTitle({ title, actionLabel, actionHref }) {
 }
 
 function Collage({ images, fallback, alt }) {
-  const unique = [];
-  const seen = new Set();
-  for (const u of (images || [])) {
-    const s = String(u || "").trim();
-    if (!s || seen.has(s)) continue;
-    seen.add(s);
-    unique.push(s);
-    if (unique.length >= 4) break;
-  }
+  const imgs = (images || []).filter(Boolean).slice(0, 4);
 
-  const imgs = unique;
-
+  // Only build a 2×2 collage when we actually have 4 slots.
   if (imgs.length >= 4) {
     return (
       <div className="grid grid-cols-2 gap-1.5 h-full w-full">
         {imgs.slice(0, 4).map((src, i) => (
-          <div key={src + i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+          <div key={i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
             <SafeImage src={src} alt={alt || ""} className="h-full w-full object-cover" />
           </div>
         ))}
@@ -52,16 +44,14 @@ function Collage({ images, fallback, alt }) {
 
   if (imgs.length === 3) {
     return (
-      <div className="grid grid-cols-2 gap-1.5 h-full w-full">
-        <div className="row-span-2 overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
-          <SafeImage src={imgs[0]} alt={alt || ""} className="h-full w-full object-cover" />
-        </div>
-        <div className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
-          <SafeImage src={imgs[1]} alt={alt || ""} className="h-full w-full object-cover" />
-        </div>
-        <div className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
-          <SafeImage src={imgs[2]} alt={alt || ""} className="h-full w-full object-cover" />
-        </div>
+      <div className="grid grid-cols-2 grid-rows-2 gap-1.5 h-full w-full">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+            {i < 3 ? (
+              <SafeImage src={imgs[i]} alt={alt || ""} className="h-full w-full object-cover" />
+            ) : null}
+          </div>
+        ))}
       </div>
     );
   }
@@ -70,7 +60,7 @@ function Collage({ images, fallback, alt }) {
     return (
       <div className="grid grid-cols-2 gap-1.5 h-full w-full">
         {imgs.map((src, i) => (
-          <div key={src + i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
+          <div key={i} className="overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
             <SafeImage src={src} alt={alt || ""} className="h-full w-full object-cover" />
           </div>
         ))}
@@ -267,16 +257,33 @@ function LegacyCollections({ products, categories, hero }) {
 export default function Home() {
   const { products, categories, hero, homeHeroes } = useStore();
 
+  const secretSlugs = useMemo(() => {
+    return new Set(
+      (categories || [])
+        .filter((c) => String(c.category_type || "normal") === "secret")
+        .map((c) => String(c.slug || "").toLowerCase())
+        .filter(Boolean)
+    );
+  }, [categories]);
+
+  const publicProducts = useMemo(() => {
+    return (products || []).filter((p) => {
+      const cat = String(p.category || "").toLowerCase();
+      if (!secretSlugs.has(cat)) return true;
+      return isCategoryUnlocked(cat);
+    });
+  }, [products, secretSlugs]);
+
   const featured = useMemo(() => {
-    const arr = (products || []).filter((p) => p.featured);
-    return (arr.length ? arr : products || []).slice(0, 8);
-  }, [products]);
+    const arr = (publicProducts || []).filter((p) => p.featured);
+    return (arr.length ? arr : publicProducts || []).slice(0, 8);
+  }, [publicProducts]);
 
   const productById = useMemo(() => {
     const m = new Map();
-    (products || []).forEach((p) => m.set(String(p.id), p));
+    (publicProducts || []).forEach((p) => m.set(String(p.id), p));
     return m;
-  }, [products]);
+  }, [publicProducts]);
 
   const categoryByIdOrSlug = useMemo(() => {
     const m = new Map();
@@ -294,19 +301,6 @@ export default function Home() {
       .slice()
       .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
   }, [homeHeroes]);
-
-  function dedupeImages(arr, limit = 8) {
-    const out = [];
-    const seen = new Set();
-    for (const x of arr || []) {
-      const s = String(x || "").trim();
-      if (!s || seen.has(s)) continue;
-      seen.add(s);
-      out.push(s);
-      if (out.length >= limit) break;
-    }
-    return out;
-  }
 
   function resolveCategory(quad) {
     const key = quad?.category_id ? String(quad.category_id) : "";
@@ -331,7 +325,7 @@ export default function Home() {
         href: `/product/${p.id}`,
         title: quad?.title || p.name,
         subtitle: `Product • $${getUnitPrice(p)}`,
-        images: dedupeImages([p.image, ...(p.images || [])], 8),
+        images: [p.image || (p.images || [])[0] || quad?.image_url].filter(Boolean),
       };
     }
 
@@ -346,15 +340,15 @@ export default function Home() {
       .filter(Boolean);
 
     const auto = slug
-      ? (products || []).filter((p) => String(p.category) === slug).slice(0, 6)
+      ? (publicProducts || []).filter((p) => String(p.category) === slug).slice(0, 6)
       : [];
 
     const chosen = mode === "manual" ? fromManual : auto;
-    const images = dedupeImages([
+    const images = [
       quad?.image_url,
-      ...chosen.map((p) => p.image),
-      ...chosen.flatMap((p) => p.images || []),
-    ], 12);
+      ...chosen.map((p) => p.image).filter(Boolean),
+      ...(chosen.flatMap((p) => p.images || []).filter(Boolean)),
+    ].filter(Boolean);
 
     return {
       href,
@@ -368,100 +362,102 @@ export default function Home() {
     <main className="bg-[var(--color-bg)] relative overflow-hidden">
       <div aria-hidden className="pointer-events-none absolute -top-48 -left-48 h-[620px] w-[620px] rounded-full bg-[radial-gradient(circle,rgba(15,23,42,0.10),rgba(15,23,42,0))] blur-3xl" />
       <div aria-hidden className="pointer-events-none absolute -bottom-56 -right-56 h-[760px] w-[760px] rounded-full bg-[radial-gradient(circle,rgba(15,23,42,0.08),rgba(15,23,42,0))] blur-3xl" />
-      <div className="max-w-7xl mx-auto px-6 md:px-10 pt-10 md:pt-12 pb-16">
+      <div className="max-w-7xl mx-auto px-6 md:px-10 pt-8 pb-16">
         {activeHeroes.length ? (
           <div className="space-y-14">
             {activeHeroes.map((h, idx) => (
-              <section
-                key={h.id}
-                className="rounded-[2.75rem] overflow-hidden border border-[rgba(17,24,39,0.10)] bg-[var(--color-surface-2)] shadow-[0_34px_90px_rgba(0,0,0,0.07)]"
-              >
-                {/* Big image */}
-                <div className="relative">
-                  <div className="relative h-[70vh] min-h-[460px] max-h-[820px] overflow-hidden">
-                    <SafeImage
-                      src={h.image_url}
-                      alt={h.title || "Hero"}
-                      className="h-full w-full object-cover lux-kenburns"
-                    />
-                  </div>
-
-                  {/* Vignette / editorial overlays */}
-                  <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(900px_420px_at_20%_15%,rgba(255,255,255,0.10),rgba(255,255,255,0))]" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/0 pointer-events-none" />
-                  <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent to-[var(--color-bg)] pointer-events-none" />
-
-                  {(h.title || h.subtitle || h.primary_cta_label || h.secondary_cta_label) ? (
-                    <div
-                      className="absolute left-6 bottom-6 sm:left-10 sm:bottom-10 max-w-2xl lux-reveal"
-                      style={{ animationDelay: `${idx * 80}ms` }}
-                    >
-                      <div className="text-[11px] uppercase tracking-[0.30em] text-white/70">Collection</div>
-                      {h.title ? (
-                        <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-6xl leading-[1.02] tracking-tight text-white">
-                          {h.title}
-                        </h1>
-                      ) : null}
-                      {h.subtitle ? (
-                        <p className="mt-3 text-sm sm:text-base text-white/85 leading-relaxed max-w-xl">
-                          {h.subtitle}
-                        </p>
-                      ) : null}
-
-                      {(h.primary_cta_label && h.primary_cta_href) || (h.secondary_cta_label && h.secondary_cta_href) ? (
-                        <div className="mt-5 flex flex-wrap items-center gap-3">
-                          {h.primary_cta_label && h.primary_cta_href ? (
-                            <Link
-                              to={h.primary_cta_href}
-                              className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold bg-white text-black hover:opacity-95 transition"
-                            >
-                              {h.primary_cta_label}
-                            </Link>
-                          ) : null}
-                          {h.secondary_cta_label && h.secondary_cta_href ? (
-                            <Link
-                              to={h.secondary_cta_href}
-                              className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold border border-white/40 bg-black/10 text-white hover:bg-white/10 transition"
-                            >
-                              {h.secondary_cta_label}
-                            </Link>
-                          ) : null}
-                        </div>
-                      ) : null}
+              <div key={h.id} className="space-y-6 sm:space-y-8">
+                {/* HERO CARD */}
+                <section className="rounded-[2.75rem] overflow-hidden border border-[rgba(17,24,39,0.10)] bg-[var(--color-surface-2)] shadow-[0_34px_90px_rgba(0,0,0,0.07)]">
+                  <div className="relative overflow-hidden">
+                    {/* Editorial hero frame (avoid "cut" feeling + preserve text breathing room) */}
+                    <div className="relative h-[68vh] sm:h-[76vh] lg:h-[84vh] min-h-[480px] sm:min-h-[560px] lg:min-h-[640px] max-h-[900px] overflow-hidden">
+                      <SafeImage
+                        src={h.image_url}
+                        alt={h.title || "Hero"}
+                        className="h-full w-full object-cover object-[50%_35%] lux-kenburns"
+                      />
                     </div>
-                  ) : null}
 
-                  {/* subtle cue */}
-                  <div className="absolute right-6 bottom-6 sm:right-10 sm:bottom-10 hidden sm:flex items-center gap-3 text-white/75 pointer-events-none lux-reveal" style={{ animationDelay: `${idx * 80 + 140}ms` }}>
-                    <span className="text-[11px] uppercase tracking-[0.30em]">Explore</span>
-                    <span className="h-px w-10 bg-white/35" />
-                  </div>
-                </div>
+                    {/* Vignette / editorial overlays */}
+                    <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(900px_420px_at_20%_15%,rgba(255,255,255,0.10),rgba(255,255,255,0))]" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/0 pointer-events-none" />
 
-                {/* 4 quads */}
-                <div className="relative -mt-10 sm:-mt-14 p-4 sm:p-7 bg-[linear-gradient(180deg,rgba(255,255,255,1),rgba(255,255,255,0.96))] rounded-t-[2.5rem]">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-7">
-                    {(h.quads || []).slice(0, 4).map((q, qi) => {
-                      const view = resolveQuadView(q);
-                      return (
-                        <LuxuryQuad
-                          key={`${h.id}-${q.position}`}
-                          href={view.href}
-                          title={view.title}
-                          subtitle={view.subtitle}
-                          images={view.images}
-                          fallbackImage={h.image_url}
-                          delayMs={idx * 80 + 220 + qi * 70}
-                        />
-                      );
-                    })}
+                    {(h.title || h.subtitle) ? (
+                      <div
+                        className="absolute left-6 bottom-12 sm:left-10 sm:bottom-16 max-w-2xl lux-reveal"
+                        style={{ animationDelay: `${idx * 80}ms` }}
+                      >
+                        <div className="text-[11px] uppercase tracking-[0.30em] text-white/70">Collection</div>
+                        {h.title ? (
+                          <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-6xl leading-[1.02] tracking-tight text-white">
+                            {h.title}
+                          </h1>
+                        ) : null}
+                        {h.subtitle ? (
+                          <p className="mt-3 text-sm sm:text-base text-white/85 leading-relaxed max-w-xl">
+                            {h.subtitle}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* subtle cue */}
+                    <div
+                      className="absolute right-6 bottom-12 sm:right-10 sm:bottom-16 hidden sm:flex items-center gap-3 text-white/75 pointer-events-none lux-reveal"
+                      style={{ animationDelay: `${idx * 80 + 140}ms` }}
+                    >
+                      <span className="text-[11px] uppercase tracking-[0.30em]">Explore</span>
+                      <span className="h-px w-10 bg-white/35" />
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
+
+                {/* QUADS CARD (separate from hero) */}
+                <section className="rounded-[2.75rem] overflow-hidden border border-[rgba(17,24,39,0.10)] bg-[var(--color-surface-2)] shadow-[0_26px_70px_rgba(0,0,0,0.06)]">
+                  <div className="p-4 sm:p-7 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,255,255,0.94))] backdrop-blur">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-7">
+                      {(h.quads || []).slice(0, 4).map((q, qi) => {
+                        const view = resolveQuadView(q);
+                        return (
+                          <LuxuryQuad
+                            key={`${h.id}-${q.position}`}
+                            href={view.href}
+                            title={view.title}
+                            subtitle={view.subtitle}
+                            images={view.images}
+                            fallbackImage={h.image_url}
+                            delayMs={idx * 80 + 220 + qi * 70}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+              </div>
             ))}
           </div>
         ) : (
-          <LegacyCollections products={products || []} categories={categories || []} hero={hero} />
+          <div className="space-y-10">
+            <div className="rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 sm:p-8 shadow-sm lux-reveal">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Homepage builder is ready</p>
+                  <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                    No fashion heroes have been created yet. Add your first hero (big image + 4 quads) from the Admin.
+                  </p>
+                </div>
+                <Link
+                  to="/admin"
+                  className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-95 transition"
+                >
+                  Go to Admin → Home
+                </Link>
+              </div>
+            </div>
+
+            <LegacyCollections products={publicProducts || []} categories={categories || []} hero={hero} />
+          </div>
         )}
 
         {/* Featured */}
