@@ -366,7 +366,6 @@ export default function Home() {
         {activeHeroes.length ? (
           <div className="space-y-14">
             {activeHeroes.map((h, idx) => (
-<<<<<<< HEAD
               <div key={h.id} className="space-y-6 sm:space-y-8">
                 {/* HERO CARD */}
                 <section className="rounded-[2.75rem] overflow-hidden border border-[rgba(17,24,39,0.10)] bg-[var(--color-surface-2)] shadow-[0_34px_90px_rgba(0,0,0,0.07)]">
@@ -378,48 +377,8 @@ export default function Home() {
                         alt={h.title || "Hero"}
                         className="h-full w-full object-cover object-[50%_35%] lux-kenburns"
                       />
-=======
-              <section
-                key={h.id}
-                className="rounded-[2.75rem] overflow-hidden border border-[rgba(17,24,39,0.10)] bg-[var(--color-surface-2)] shadow-[0_34px_90px_rgba(0,0,0,0.07)]"
-              >
-                {/* Big image */}
-                <div className="relative">
-                  {/* Editorial hero frame (avoid "cut" feeling + preserve text breathing room) */}
-                  <div className="relative h-[68vh] sm:h-[76vh] lg:h-[84vh] min-h-[480px] sm:min-h-[560px] lg:min-h-[640px] max-h-[900px] overflow-hidden">
-                    <SafeImage
-                      src={h.image_url}
-                      alt={h.title || "Hero"}
-                      className="h-full w-full object-cover object-[50%_35%] lux-kenburns"
-                    />
-                  </div>
-
-                  {/* Vignette / editorial overlays */}
-                  <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(900px_420px_at_20%_15%,rgba(255,255,255,0.10),rgba(255,255,255,0))]" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/0 pointer-events-none" />
-
-                  {(h.title || h.subtitle) ? (
-                    <div
-                      className="absolute left-6 bottom-12 sm:left-10 sm:bottom-16 max-w-2xl lux-reveal"
-                      style={{ animationDelay: `${idx * 80}ms` }}
-                    >
-                      <div className="text-[11px] uppercase tracking-[0.30em] text-white/70">
-                        Collection
-                      </div>
-                      {h.title ? (
-                        <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-6xl leading-[1.02] tracking-tight text-white">
-                          {h.title}
-                        </h1>
-                      ) : null}
-                      {h.subtitle ? (
-                        <p className="mt-3 text-sm sm:text-base text-white/85 leading-relaxed max-w-xl">
-                          {h.subtitle}
-                        </p>
-                      ) : null}
->>>>>>> 879a70db64e31275790fa9cc6f2653aa41870ef9
                     </div>
 
-<<<<<<< HEAD
                     {/* Vignette / editorial overlays */}
                     <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(900px_420px_at_20%_15%,rgba(255,255,255,0.10),rgba(255,255,255,0))]" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/0 pointer-events-none" />
@@ -451,32 +410,6 @@ export default function Home() {
                       <span className="text-[11px] uppercase tracking-[0.30em]">Explore</span>
                       <span className="h-px w-10 bg-white/35" />
                     </div>
-=======
-                  {/* subtle cue */}
-                  <div className="absolute right-6 bottom-12 sm:right-10 sm:bottom-16 hidden sm:flex items-center gap-3 text-white/75 pointer-events-none lux-reveal" style={{ animationDelay: `${idx * 80 + 140}ms` }}>
-                    <span className="text-[11px] uppercase tracking-[0.30em]">Explore</span>
-                    <span className="h-px w-10 bg-white/35" />
-                  </div>
-                </div>
-
-                {/* 4 quads */}
-                <div className="relative mt-0 p-4 sm:p-7 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,255,255,0.94))] backdrop-blur border-t border-[rgba(17,24,39,0.10)]">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-7">
-                    {(h.quads || []).slice(0, 4).map((q, qi) => {
-                      const view = resolveQuadView(q);
-                      return (
-                        <LuxuryQuad
-                          key={`${h.id}-${q.position}`}
-                          href={view.href}
-                          title={view.title}
-                          subtitle={view.subtitle}
-                          images={view.images}
-                          fallbackImage={h.image_url}
-                          delayMs={idx * 80 + 220 + qi * 70}
-                        />
-                      );
-                    })}
->>>>>>> 879a70db64e31275790fa9cc6f2653aa41870ef9
                   </div>
                 </section>
 
