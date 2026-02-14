@@ -30,6 +30,22 @@ export default function OrderSuccess() {
           Thanks! We got your order. We&rsquo;ll contact you on WhatsApp to confirm availability.
         </p>
 
+        {data?.whatsapp_url ? (
+          <div className="mt-6">
+            <a
+              href={data.whatsapp_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-full px-5 py-3 text-sm bg-[var(--color-primary)] text-[var(--color-on-primary)]"
+            >
+              Open WhatsApp
+            </a>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              If WhatsApp didn&rsquo;t open automatically, tap the button above.
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-8 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>

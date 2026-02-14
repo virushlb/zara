@@ -6,7 +6,6 @@ import { useNavigate } from "react-router-dom";
 import { getMaxStockFor } from "../lib/stock";
 import { fetchShippingSettings } from "../lib/shipping";
 import { createOrder } from "../lib/orders";
-import { supabaseEnabled } from "../lib/supabase";
 import SafeImage from "../components/SafeImage";
 import { getUnitPrice, hasDiscount, getBasePrice } from "../lib/pricing";
 import { useStore } from "../context/StoreContext";
@@ -107,6 +106,12 @@ export default function Cart() {
       return;
     }
 
+    // IMPORTANT (mobile popup blockers):
+    // Opening a new tab *after* awaiting network calls is often blocked.
+    // So we pre-open a blank window synchronously (still within the click gesture)
+    // and then navigate it once the WhatsApp URL is ready.
+    const waWindow = window.open("about:blank", "_blank");
+
     const methods = shippingSettings?.methods || [];
     const selectedMethod = methods.find((m) => String(m.code) === String(shippingMethod));
     const methodLabel = selectedMethod?.label || shippingMethod || "Delivery";
@@ -131,37 +136,37 @@ export default function Cart() {
       ? `\nPromo: *${promoApplied.code}* (-$${discount})`
       : "";
 
-    // Try to create an order in Supabase (optional). If it fails, WhatsApp still opens.
+    // Create the order.
+    // We always attempt this (createOrder already handles "demo/local" mode).
+    // If it fails we still continue to WhatsApp, BUT we log it so you can debug.
     let createdOrderId = "";
-    if (supabaseEnabled) {
-      try {
-        const payload = {
-          status: "new",
-          customer,
-          items: cart.map((i) => ({
-            product_id: i.id,
-            name: i.name,
-            price: getUnitPrice(i),
-            quantity: i.quantity,
-            size: i.size || null,
-            variantIndex: i.variantIndex ?? null,
-            image: i.image || null,
-          })),
-          promo_code: promoApplied ? promoApplied.code : null,
-          delivery_method: shippingMethod || null,
-          notes: customer?.notes || "",
-          subtotal,
-          discount,
-          shipping: shippingFee,
-          total,
-        };
+    const payload = {
+      status: "new",
+      customer,
+      items: cart.map((i) => ({
+        product_id: i.id,
+        name: i.name,
+        price: getUnitPrice(i),
+        quantity: i.quantity,
+        size: i.size || null,
+        variantIndex: i.variantIndex ?? null,
+        image: i.image || null,
+      })),
+      promo_code: promoApplied ? promoApplied.code : null,
+      delivery_method: shippingMethod || null,
+      notes: customer?.notes || "",
+      subtotal,
+      discount,
+      shipping: shippingFee,
+      total,
+    };
 
-        const res = await createOrder(payload);
-        if (res?.ok && res.id) createdOrderId = String(res.id);
-      } catch {
-        // ignore
-      }
+    const res = await createOrder(payload);
+    if (!res?.ok) {
+      // eslint-disable-next-line no-console
+      console.warn("Order insert failed", res?.error);
     }
+    if (res?.ok && res.id) createdOrderId = String(res.id);
 
     const customerLines = [
       customer?.name ? `Name: *${customer.name}*` : null,
@@ -207,6 +212,7 @@ Please confirm availability.
           })),
           promo_code: promoApplied ? promoApplied.code : null,
           delivery_method: shippingMethod || null,
+          whatsapp_url: url,
           subtotal,
           discount,
           shipping: shippingFee,
@@ -217,8 +223,20 @@ Please confirm availability.
       // ignore
     }
 
-    window.open(url, "_blank");
-    navigate("/order-success");
+    // Navigate the pre-opened window (best chance to avoid popup blockers).
+    if (waWindow) {
+      try {
+        waWindow.location.href = url;
+      } catch {
+        // ignore
+      }
+      // Keep the store tab on an order confirmation screen.
+      navigate("/order-success");
+      return;
+    }
+
+    // Fallback: if popups are blocked, open WhatsApp in the same tab.
+    window.location.href = url;
   }
   
 
